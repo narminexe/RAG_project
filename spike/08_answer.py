@@ -88,9 +88,10 @@ print("SUAL:", question)
 print("=" * 78)
 print(answer)
 print("-" * 78)
-print("Mənbələr:")
-for meta in found["metadatas"][0]:
-    print("  ", meta["url"])
+
+# The "Mənbələr:" footer used to list every RETRIEVED chunk, including ones the
+# model never used - two of three links were noise. Removed. The prompt already
+# asks the model to cite the source it actually used, inline in the answer.
 
 u = response.usage
 print(f"\n{PROVIDER}/{cfg['model']}  |  {elapsed:.1f}s  |  "

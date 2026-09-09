@@ -1,21 +1,23 @@
 r"""
-SPIKE STEP 2 - Cut the text into small chunks.
+SPIKE STEP 2 - Cut the text into chunks, each carrying its document's context.
 
-Throwaway code. In the real project YOU design this (PLAN.md Phase 2.1).
-Deliberately naive so the idea is visible.
+WHY THE CONTEXT PREFIX EXISTS
+A bullet like "...ÜOMG 81 bal və ya ondan yuxarı olması" is useless on its own:
+nothing in it says whether it is a bakalavriat or a magistratura rule. The
+heading that said "magistratura" ended up in a different chunk, so the model
+correctly refused to answer "magistratura üçün ortalama nə qədər olmalıdır".
 
-Why chunk at all?
-  1. You cannot paste 40 pages into an LLM prompt.
-  2. Even if you could, you want to retrieve PRECISELY. If one chunk = one whole
-     document, then every question retrieves the whole document and the search
-     step has told you nothing.
+Fix: prepend the first CONTEXT_CHARS of the parent document to every chunk, so
+each chunk states its own scope. Set CONTEXT_CHARS = 0 to turn this off and
+measure the difference.
 
 Run:  .venv\Scripts\python.exe spike\02_chunk.py
 """
 import json
 import pathlib
 
-MAX_CHARS = 400   # rough target size for one chunk
+MAX_CHARS = 400        # target size of the chunk body
+CONTEXT_CHARS = 300    # how much of the document opening to prepend. 0 = off
 
 documents = json.loads(pathlib.Path("data/processed/spike_docs.json")
                        .read_text(encoding="utf-8"))
@@ -23,28 +25,34 @@ documents = json.loads(pathlib.Path("data/processed/spike_docs.json")
 chunks = []
 
 for doc in documents:
+    # The document's opening usually states its scope - which degree level,
+    # which academic year, which regulation.
+    context = " ".join(doc["text"][:CONTEXT_CHARS].split()) if CONTEXT_CHARS else ""
+
     lines = [line for line in doc["text"].split("\n") if line.strip()]
 
-    buffer = ""            # the chunk we are currently building up
+    bodies, buffer = [], ""
     for line in lines:
-        # Would adding this line push us past the size limit?
         if buffer and len(buffer) + len(line) + 1 > MAX_CHARS:
-            # Yes - close off the current chunk and start a fresh one.
-            chunks.append({"doc_id": doc["doc_id"], "url": doc["url"], "text": buffer})
+            bodies.append(buffer)
             buffer = line
         else:
-            # No - append the line to the chunk we are building.
             buffer = f"{buffer}\n{line}" if buffer else line
-
-    # The loop ends with a half-built chunk still in the buffer. Don't lose it.
     if buffer:
-        chunks.append({"doc_id": doc["doc_id"], "url": doc["url"], "text": buffer})
+        bodies.append(buffer)      # the loop leaves the last chunk unsaved
+
+    for body in bodies:
+        chunks.append({
+            "doc_id": doc["doc_id"],
+            "url": doc["url"],
+            "body": body,                                   # the chunk itself
+            "text": f"{context}\n---\n{body}" if context else body,   # what gets embedded
+        })
 
 out = pathlib.Path("data/processed/spike_chunks.json")
 out.write_text(json.dumps(chunks, ensure_ascii=False, indent=2), encoding="utf-8")
 
-print(f"{len(documents)} documents  ->  {len(chunks)} chunks")
-print(f"saved {out}\n")
-for i, chunk in enumerate(chunks):
-    preview = chunk["text"].replace("\n", " / ")[:110]
-    print(f"chunk {i:>2}  [{chunk['doc_id']}]  {len(chunk['text']):>3} chars  {preview}...")
+avg = sum(len(c["text"]) for c in chunks) / len(chunks)
+print(f"{len(documents)} documents -> {len(chunks)} chunks")
+print(f"context prefix: {CONTEXT_CHARS} chars | average chunk now {avg:.0f} chars")
+print(f"saved {out}")
