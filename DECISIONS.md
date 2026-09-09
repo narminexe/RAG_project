@@ -105,3 +105,57 @@ flatter a pipeline I have already seen. I mitigate this by writing questions fro
 real applicants actually email, not from what I know the system handles.
 
 **What would change my mind:** Nothing; the evaluation phases still happen, just later.
+
+---
+
+## D-005 — Generator LLM: gpt-4o-mini via OpenAI API (2026-09-09)
+
+**Decision:** `gpt-4o-mini` writes the answers. `PROVIDER` in `spike/08_answer.py`
+switches between OpenAI and a local Ollama model in one line.
+
+**Options considered:** local Ollama (qwen3:4b, gemma3:4b), OpenAI API, Azerbaijani
+fine-tunes (`az-llm/atllama`).
+
+**Why this one:** local generation does not fit this laptop. 7.8 GB RAM with ~0.5 GB
+free; `qwen3:4b` needs ~2.4 GB for weights alone and failed with
+`failed to allocate CUDA_Host buffer`. Measured cost on the API is $0.000142 per
+question, ~$0.0085 for a 60-question run, so a $4.50 credit is ~31,000 questions.
+Not a constraint.
+
+Azerbaijani fine-tunes rejected: `atllama.v3.5` ships no GGUF (16 GB safetensors,
+would need self-quantising), has zero published evaluation, and an Alpaca-style
+fine-tune on top of Llama-3.1-Instruct risks damaging instruction-following —
+which is the thing RAG actually needs, more than fluency. Base Llama was rejected
+because Meta does not list Azerbaijani among its 8 supported languages.
+
+**What it costs:** the system is no longer fully local, which PLAN.md originally
+wanted. Needs internet and a key per answer.
+
+**What would change my mind:** more RAM, or a local model that measurably writes
+acceptable Azerbaijani. Both stay open as Phase 4 experiment 7 — `qwen3:4b` is
+already pulled.
+
+---
+
+## D-006 — General knowledge stays OFF for now (deferred, 2026-09-10)
+
+**Decision:** The bot answers only from retrieved documents. It may NOT use its own
+world knowledge, even for harmless general facts. Revisit after the project works
+end to end.
+
+**The case for changing it:** "6.5 IELTS bəsdir?" cannot be answered today. The site
+states "minimum C1" and never mentions an IELTS number, so the CEFR↔IELTS mapping
+is not in the corpus and the bot correctly refuses.
+
+**Why not yet:** opening the door to outside knowledge also lets invented
+programme-specific facts through — a plausible-sounding deadline or quota from
+training data, stated as confidently as a true answer. People make real decisions on
+this. It also makes faithfulness scores noisy, because a correct general claim is not
+in the retrieved text and a judge marks it unfaithful.
+
+**Preferred fix instead:** add a published CEFR↔IELTS mapping as its own corpus
+document. Then the fact is IN the documents, the strict rule survives, and the answer
+gets a citation. Less work than the testing that Option A would need.
+
+**Revisit when:** `data/questions.csv` and the Phase 3 harness exist, so the change
+can be measured rather than guessed at.
