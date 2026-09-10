@@ -159,3 +159,91 @@ gets a citation. Less work than the testing that Option A would need.
 
 **Revisit when:** `data/questions.csv` and the Phase 3 harness exist, so the change
 can be measured rather than guessed at.
+
+---
+
+## D-005 (revised 2026-09-10) — Answer model: gpt-4.1-mini; search steps: gpt-4o-mini
+
+Same test questions, same retrieved chunks, same answer rule — only the model changed:
+
+| model | auto-checks | kept the no-outside-facts rule on "6.5 IELTS"? | $ per answer |
+|---|---|---|---|
+| gpt-4o-mini | 18/20 | no — "Bəli", then "you can't apply" | 0.00027 |
+| gpt-4o | 20/20 | no — invented "7.0" | 0.00468 |
+| **gpt-4.1-mini** | **20/20** | **yes** | **0.00077** |
+| gpt-5-mini | 17/20 | yes, but messy | 0.00057 |
+
+gpt-4o-mini failed on "burs" and "IELTS neçə bal" with the right text in front of it:
+too literal. gpt-4.1-mini matched gpt-4o at a sixth of the price. gpt-4o-mini stays for
+the two search-side steps (rewrite, pick), where it worked. Whole question: ~5 s,
+~$0.0016. The Ollama switch is now `BASE_URL` in `spike/08_answer.py`.
+
+The "kept the rule" column was measured under the old rule. D-006 (revised) now allows
+that conversion when it is labelled.
+
+---
+
+## D-006 (revised 2026-09-10) — General knowledge: allowed for terms and scale conversions
+
+**Supersedes** the D-006 above, which is kept for the record.
+
+**Decision:** two kinds of information.
+- **Programme facts** — rules, requirements, dates, amounts, documents, quotas,
+  universities, obligations. Only from retrieved documents, never from the model's
+  memory. If missing: "Bu məlumat sənədlərdə yoxdur".
+- **General facts** — short explanations of terms that appear in the programme's rules
+  ("IELTS nədir?") and standard international scale conversions ("6.5 IELTS C1-dir?").
+  The model may answer these from its own knowledge in 1-2 sentences, always labelled
+  "(ümumi məlumat, rəsmi sənəddən deyil)". No advice (exam preparation, choosing a
+  university).
+
+**Why:** real applicants ask these. A bot that refuses "IELTS nədir?", or cannot say
+whether 6.5 meets C1, is not useful. I chose not to add a separate conversion table to
+the corpus.
+
+**What it costs:**
+- Scale conversions decide eligibility, and published tables disagree at the edges.
+  A labelled general answer can still steer a real decision.
+- The line is fuzzy. "Magistratura üçün hansı sənədlər lazımdır?" sounds general but is
+  a programme fact. This has to be tested on purpose, with questions built to cross it.
+- Faithfulness metrics: a correct general claim is not in the retrieved text, so a judge
+  marks it unfaithful. Evaluation must score labelled general parts separately.
+
+**What would change my mind:** the bot stating a programme fact from memory in testing,
+or finding an official conversion table on dp.edu.az (15 PDFs are still unindexed).
+
+---
+
+## D-007 — Search: 4 versions of the question, then the LLM picks the best 5 (2026-09-10)
+
+**Problem:** people say "ortalama", "burs", "təqaüd", "diplom balı"; the site says "ÜOMG"
+and "maliyyələşdirmə". One embedding search put the right text in the top 5 for only
+13 of 19 casual questions.
+
+**Tested on the same 19 questions** (right text in top 5 / MRR):
+
+| approach | top 5 | MRR |
+|---|---|---|
+| one search (before) | 13/19 | 0.516 |
+| LLM-written "likely questions" stored with each chunk | 12/19 | 0.411 |
+| 4 versions of the question, results merged (RRF) | 16/19 | 0.715 |
+| **+ LLM reads 25 candidates, picks 5** | **18/19** | **0.820** |
+
+Storing likely questions per chunk was rejected: the LLM wrote formal, partly off-topic
+questions ("ÜOMG nədir?") and never used words like "ortalama", so it added noise.
+
+**Also fixed:** embedding the 300-character context prefix pushed IELTS answers from
+rank 1-2 down to 6-7, because the prefix is mostly identical legal boilerplate. Chunks
+are now searched on their clean text; the answer model still sees the prefixed version.
+
+**What it costs:** two extra small LLM calls per question (~2-4 s, ~$0.0008).
+
+**Known risk:** a rewrite once invented a number ("75 bal"). Harmless only because
+rewrites are used for searching and never reach the user or the answer model.
+
+**Still failing:** "Dövlət proqramına müraciət etmək üçün bakalavr ortalamam nə qədər
+olmalıdır" — the question never says magistratura, so it is read as a bachelor's
+question and answered with entrance-exam points. Needs the bot to ask back.
+
+**Caveat:** 19 questions, written by me, one run each. A strong sign, not proof —
+data/questions.csv is what turns it into a measurement.

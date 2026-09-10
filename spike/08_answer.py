@@ -1,65 +1,111 @@
 r"""
-SPIKE STEP 8 - Generation (tutorial step 6). THE LAST PIECE.
+SPIKE STEP 8 - Answer a question (tutorial step 6: generation).
 
-Retrieve from Chroma -> build the prompt -> send it to an LLM -> print the
-answer with its sources.
+What happens when you ask a question, in order:
 
-Swap the generator by changing PROVIDER below. Retrieval, chunks and prompt stay
-identical, which is what makes the comparison fair (PLAN.md Phase 4, exp. 7).
+  1. REWRITE  The LLM writes the question 3 more ways: in the official language of
+              the documents, in plain language, and with its most likely meaning
+              spelled out. People say "ortalama"; the website says "Ümumi Orta
+              Müvəffəqiyyət Göstəricisi". This step bridges the two.
+  2. SEARCH   All 4 versions are searched in Chroma and the results are merged. A
+              chunk that ranks well for several versions rises to the top.
+  3. PICK     The LLM reads the best 25 chunks next to the question and picks the 5
+              that really answer it. Search compares blurry summaries; this reads.
+  4. ANSWER   The answer model writes the reply from those 5 chunks only - plus short,
+              labelled general knowledge where DECISIONS.md D-006 (revised) allows it.
 
-Ollama speaks the OpenAI API format, so both providers use the same client and
-the same code path - only base_url and model change.
+Measured on the same test questions (typos, synonyms, must-refuse controls):
+  before: right text in top 5 for 13/19, correct answers 15/21
+  now:    right text in top 5 for 18/19, correct answers 20/20
+  about 5 seconds and $0.0016 per question. See DECISIONS.md D-005, D-007.
 
 Run:  .venv\Scripts\python.exe spike\08_answer.py "sualınız"
+      .venv\Scripts\python.exe spike\08_answer.py "sualınız" --debug
 """
+import logging
 import os
+import pathlib
 import re
 import sys
 import time
+
+# --- quiet start-up ---------------------------------------------------------------
+# If LocRet is already downloaded, do not ask HuggingFace about it on every run.
+# That lookup hung for minutes when the wifi dropped.
+if (pathlib.Path.home() / ".cache/huggingface/hub/models--LocalDoc--LocRet-small").exists():
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+os.environ.setdefault("TQDM_DISABLE", "1")
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+
 import chromadb
 from dotenv import load_dotenv
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer
 
-PROVIDER = "openai"          # <-- the one line to change: "ollama" or "openai"
-TOP_K = 3
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
 
-load_dotenv()
-CONFIG = {
-    # local, free, offline. api_key is required by the client but ignored by Ollama.
-    "ollama": dict(model="qwen3:4b", base_url="http://localhost:11434/v1", api_key="ollama"),
-    # paid, fast. Needs OPENAI_API_KEY in .env
-    "openai": dict(model="gpt-4o-mini", base_url=None, api_key=os.getenv("OPENAI_API_KEY")),
-}
-cfg = CONFIG[PROVIDER]
-if not cfg["api_key"]:
-    sys.exit(f"No API key for provider '{PROVIDER}'. Put it in .env, then re-run.")
+# --- settings ---------------------------------------------------------------------
+EMBED_MODEL  = "LocalDoc/LocRet-small"  # must match 06_index_chroma.py (D-002)
+SEARCH_MODEL = "gpt-4o-mini"            # steps 1 and 3 - cheap, fast, worked well
+ANSWER_MODEL = "gpt-4.1-mini"           # step 4 - best of 4 models tested (D-005)
+BASE_URL     = None                     # "http://localhost:11434/v1" = local Ollama
 
-# $ per 1M tokens, input/output. Only meaningful for paid providers.
-PRICES = {"gpt-4o-mini": (0.15, 0.60), "gpt-4o": (2.50, 10.00)}
+N_REWRITES = 3    # extra versions of the question
+PER_QUERY  = 50   # chunks fetched for each version
+CANDIDATES = 25   # chunks the LLM reads in step 3
+TOP_K      = 5    # chunks the answer model gets
 
-question = sys.argv[1] if len(sys.argv) > 1 else "Təqaüd təhsil haqqından əlavə nəyi ödəyir?"
+REFUSAL = "Bu məlumat sənədlərdə yoxdur"   # exact text - code will detect it later
 
-# --- RETRIEVAL: same LocRet model that built the index (DECISIONS.md D-002) ---
-embedder = SentenceTransformer("LocalDoc/LocRet-small")
-collection = chromadb.PersistentClient(path="data/chroma").get_collection("dp_chunks")
-q_vector = embedder.encode([question], prompt_name="query",
-                           normalize_embeddings=True)[0].tolist()
-found = collection.query(query_embeddings=[q_vector], n_results=TOP_K)
+# $ per 1M tokens (input, output). Check the OpenAI pricing page - these move.
+PRICES = {"gpt-4o-mini": (0.15, 0.60), "gpt-4.1-mini": (0.40, 1.60)}
 
-context = "\n\n".join(
-    f"[mənbə {n}] {meta['url']}\n{doc}"
-    for n, (doc, meta) in enumerate(zip(found["documents"][0], found["metadatas"][0]), 1)
-)
+# --- prompts ----------------------------------------------------------------------
+REWRITE_PROMPT = """Bu sual Azərbaycanın xaricdə təhsil üzrə Dövlət Proqramı haqqındadır.
+Onu 3 fərqli şəkildə yenidən yaz:
+1) Dövlət sənədlərinin rəsmi dilində.
+2) Sadə, aydın ədəbi dildə.
+3) Sualın ən çox ehtimal olunan mənasını açıq göstərməklə (hansı təhsil səviyyəsi, hansı xərc və s.).
+Yeni fakt əlavə etmə. Hər birini ayrı sətirdə yaz, nömrəsiz, başqa heç nə yazma.
 
-# --- AUGMENTATION: glue the found text onto the question ---
-prompt = f"""Sən Dövlət Proqramı haqqında suallara cavab verən köməkçisən.
+Sual: {question}"""
+
+PICK_PROMPT = """Sual: {question}
+
+Aşağıda nömrələnmiş mətn parçaları var. Hansı parçalar bu sualın cavabını ehtiva edir?
+Ən uyğun 5 parçanın nömrəsini uyğunluq sırası ilə yaz, yalnız nömrələr, vergüllə: məsələn 3,7,1,12,5
+
+{candidates}"""
+
+ANSWER_PROMPT = """Sən Xaricdə təhsil üzrə Dövlət Proqramı haqqında suallara cavab verən köməkçisən.
+
+İKİ NÖV MƏLUMAT VAR:
+
+1) PROQRAM MƏLUMATI - Dövlət Proqramının qaydaları, tələbləri, tarixləri, məbləğləri,
+   sənədləri, kvotaları, universitetləri və öhdəlikləri.
+   Bunları YALNIZ aşağıdakı MƏTN-dən götür. Mətndə yoxdursa, öz biliyinlə heç vaxt doldurma.
+
+2) ÜMUMİ MƏLUMAT - Dövlət Proqramının qaydalarında keçən anlayışların qısa izahı (məsələn,
+   bir imtahanın, sertifikatın və ya dərəcənin nə olduğu) və standart beynəlxalq
+   şkalaların çevrilməsi (məsələn, dil imtahanı balının CEFR səviyyəsinə uyğunluğu).
+   Bunu öz biliyinlə 1-2 cümlə ilə verə bilərsən, amma həmin hissənin sonuna mütləq
+   "(ümumi məlumat, rəsmi sənəddən deyil)" yaz. Məsləhət (hazırlıq, universitet seçimi
+   və s.) vermə.
 
 QAYDALAR:
-- Yalnız aşağıdakı mətnə əsasən cavab ver.
-- Cavab mətndə yoxdursa, "Bu məlumat sənədlərdə yoxdur" de. Heç nə uydurma.
-- Sualın dilində cavab ver.
-- İstifadə etdiyin mənbənin linkini göstər.
+- İstifadəçi gündəlik sözlər, sinonimlər, qısaltmalar və ya səhv yazılış işlədə bilər.
+  Sözlərə yox, MƏNAYA bax.
+- Rəqəmi yalnız sualın soruşduğu tələbə aid olduqda işlət. Başqa təhsil səviyyəsinin və
+  ya başqa imtahanın rəqəmini cavab kimi vermə.
+- İstifadəçi öz nəticəsini deyib bəs edib-etmədiyini soruşursa: cavabı "Bəli" və ya
+  "Xeyr" ilə başla, sonra mətndəki tələbi göstər. Müqayisə üçün şkala çevrilməsi
+  lazımdırsa, ümumi məlumatdan istifadə et və onu işarələ.
+- Sual proqram məlumatı tələb edirsə və o, mətndə yoxdursa, yalnız "Bu məlumat sənədlərdə yoxdur" yaz.
+- Sual Dövlət Proqramı ilə əlaqəli deyilsə, yalnız "Bu məlumat sənədlərdə yoxdur" yaz.
+- Sualın dilində cavab ver. Qısa və aydın yaz.
+- Proqram məlumatı üçün istifadə etdiyin mənbənin linkini göstər.
 
 MƏTN:
 {context}
@@ -68,35 +114,110 @@ SUAL: {question}
 
 CAVAB:"""
 
-# --- GENERATION ---
-client = OpenAI(api_key=cfg["api_key"], base_url=cfg["base_url"])
-t0 = time.time()
-response = client.chat.completions.create(
-    model=cfg["model"],
-    messages=[{"role": "user", "content": prompt}],
-    temperature=0,   # 0 = as repeatable as possible. A different answer every run
-)                    # cannot be measured, and Phase 3 needs to measure it.
-elapsed = time.time() - t0
+# --- the pipeline -----------------------------------------------------------------
+_state = {}
 
-answer = response.choices[0].message.content
-# Qwen3 can emit its reasoning inside <think>...</think>. Strip it - the user
-# wants the answer, and leaving it in would poison the evaluation metrics.
-answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
 
-print("=" * 78)
-print("SUAL:", question)
-print("=" * 78)
-print(answer)
-print("-" * 78)
+def _setup():
+    """Load the models and the index once, on first use."""
+    if not _state:
+        if BASE_URL is None and not os.getenv("OPENAI_API_KEY"):
+            sys.exit("No OPENAI_API_KEY in .env - add it, then re-run.")
+        _state["embedder"] = SentenceTransformer(EMBED_MODEL)
+        _state["collection"] = (chromadb.PersistentClient(path=str(ROOT / "data" / "chroma"))
+                                .get_collection("dp_chunks"))
+        _state["llm"] = OpenAI(base_url=BASE_URL, api_key=os.getenv("OPENAI_API_KEY") or "ollama")
+    return _state
 
-# The "Mənbələr:" footer used to list every RETRIEVED chunk, including ones the
-# model never used - two of three links were noise. Removed. The prompt already
-# asks the model to cite the source it actually used, inline in the answer.
 
-u = response.usage
-print(f"\n{PROVIDER}/{cfg['model']}  |  {elapsed:.1f}s  |  "
-      f"{u.prompt_tokens} in + {u.completion_tokens} out tokens")
-if cfg["model"] in PRICES:
-    pin, pout = PRICES[cfg["model"]]
-    cost = u.prompt_tokens / 1e6 * pin + u.completion_tokens / 1e6 * pout
-    print(f"cost: ~${cost:.6f} this question  (~${cost*60:.4f} for 60)")
+def _chat(model, prompt, usage):
+    """One LLM call. temperature=0 so the same question gives the same answer -
+    a different answer every run could not be measured."""
+    r = _setup()["llm"].chat.completions.create(
+        model=model, temperature=0, messages=[{"role": "user", "content": prompt}])
+    tokens = usage.setdefault(model, [0, 0])
+    tokens[0] += r.usage.prompt_tokens
+    tokens[1] += r.usage.completion_tokens
+    text = r.choices[0].message.content or ""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()   # Qwen via Ollama
+
+
+def rewrite(question, usage):
+    """Step 1. The rewrites can contain invented facts (one test rewrite invented
+    "75 bal"). That is harmless ONLY because they are used for searching and never
+    shown to the user or to the answer model. Keep it that way."""
+    raw = _chat(SEARCH_MODEL, REWRITE_PROMPT.format(question=question), usage)
+    lines = [re.sub(r"^\s*(\d+[.)]|[-•*])\s*", "", line).strip() for line in raw.splitlines()]
+    return [line for line in lines if line][:N_REWRITES]
+
+
+def search(queries):
+    """Step 2. Search every version, merge with reciprocal rank fusion:
+    each chunk scores 1/(60 + its rank) per version, and the scores add up."""
+    s = _setup()
+    vectors = s["embedder"].encode(queries, prompt_name="query", normalize_embeddings=True).tolist()
+    found = s["collection"].query(query_embeddings=vectors,
+                                  n_results=min(PER_QUERY, s["collection"].count()),
+                                  include=["documents", "metadatas"])
+    scores, chunks = {}, {}
+    for ids, docs, metas in zip(found["ids"], found["documents"], found["metadatas"]):
+        for rank, (cid, doc, meta) in enumerate(zip(ids, docs, metas), start=1):
+            scores[cid] = scores.get(cid, 0) + 1 / (60 + rank)
+            chunks[cid] = (cid, doc, meta)
+    best = sorted(scores, key=scores.get, reverse=True)[:CANDIDATES]
+    return [chunks[cid] for cid in best]
+
+
+def pick(question, candidates, usage):
+    """Step 3. The LLM reads each candidate next to the question and chooses."""
+    listing = "\n\n".join(f"[{n}] {doc[:700]}" for n, (_, doc, _) in enumerate(candidates, 1))
+    raw = _chat(SEARCH_MODEL, PICK_PROMPT.format(question=question, candidates=listing), usage)
+    chosen = []
+    for n in map(int, re.findall(r"\d+", raw)):
+        if 1 <= n <= len(candidates) and candidates[n - 1] not in chosen:
+            chosen.append(candidates[n - 1])
+    return chosen[:TOP_K] or candidates[:TOP_K]   # nonsense reply -> fall back to search order
+
+
+def answer(question):
+    """Question in, answer out. Returns a dict so a UI can use the parts."""
+    _setup()
+    t0, usage = time.time(), {}
+    queries = [question] + rewrite(question, usage)
+    chosen = pick(question, search(queries), usage)
+    context = "\n\n".join(f"[mənbə {n}] {meta['url']}\n{doc}"
+                          for n, (_, doc, meta) in enumerate(chosen, 1))
+    text = _chat(ANSWER_MODEL, ANSWER_PROMPT.format(context=context, question=question), usage)
+    cost = sum(i / 1e6 * PRICES.get(m, (0, 0))[0] + o / 1e6 * PRICES.get(m, (0, 0))[1]
+               for m, (i, o) in usage.items())
+    return {
+        "answer": text,
+        "refused": text.startswith(REFUSAL),
+        "sources": list(dict.fromkeys(meta["url"] for _, _, meta in chosen)),
+        "queries": queries,
+        "chosen": [(cid, meta["doc_id"]) for cid, _, meta in chosen],
+        "seconds": time.time() - t0,
+        "cost": cost,
+    }
+
+
+if __name__ == "__main__":
+    debug = "--debug" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--debug"]
+    question = args[0] if args else "magistratura üçün ortalama nə qədər olmalıdır"
+
+    result = answer(question)
+
+    print("=" * 78)
+    print("SUAL:", question)
+    print("=" * 78)
+    print(result["answer"])
+    print("-" * 78)
+    if debug:
+        print("searched with:")
+        for q in result["queries"]:
+            print("   ", q)
+        print("chunks given to the answer model:")
+        for cid, doc_id in result["chosen"]:
+            print(f"    {cid:<10} {doc_id}")
+    print(f"{result['seconds']:.1f}s  |  ~${result['cost']:.5f}  |  answer by {ANSWER_MODEL}")

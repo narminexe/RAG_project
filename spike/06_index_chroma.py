@@ -28,7 +28,11 @@ model = SentenceTransformer(MODEL_NAME)
 
 # The expensive step. From now on it happens once, not once per search.
 print(f"embedding {len(chunks)} chunks ...")
-vectors = model.encode([c["text"] for c in chunks],
+# SEARCH on the clean chunk ("body"). The 300-char context prefix is mostly
+# identical legal boilerplate, so embedding it made chunks look alike and pushed
+# IELTS answers from rank 1-2 down to rank 6-7. The prefixed "text" is still
+# stored below, so the MODEL sees the context when it writes the answer.
+vectors = model.encode([c["body"] for c in chunks],
                        prompt_name="document",
                        normalize_embeddings=True)
 
