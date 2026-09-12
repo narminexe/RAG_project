@@ -247,3 +247,45 @@ question and answered with entrance-exam points. Needs the bot to ask back.
 
 **Caveat:** 19 questions, written by me, one run each. A strong sign, not proof —
 data/questions.csv is what turns it into a measurement.
+
+---
+
+## D-008 — Conversation layer: spike/09_chat.py (2026-09-10)
+
+**Decision:** the chatbot wraps the RAG steps of 08_answer.py in a conversation layer.
+
+1. **Understand** — one small JSON call (gpt-4o-mini) reads the new message plus the
+   last 3 turns and labels it: chat (greeting, thanks, "who are you"), offtopic, or
+   programme. Chat and offtopic get a short friendly reply with no search. A programme
+   message gets a complete stand-alone question plus 3 search rewrites.
+2. **Search + pick** — reused from 08_answer.py, so it lives in one place.
+3. **Answer** — warm tone, "siz", simple words, 2-5 sentences. Programme facts only
+   from the documents. If they are missing, the model writes the marker NO_ANSWER and
+   the code swaps in a fixed friendly refusal with dp22-28@edu.gov.az. A fixed marker
+   is easy to detect and count, and the email can never be mistyped.
+4. A disclaimer opens every chat: unofficial student project, verify on dp.edu.az.
+
+**The rule that must not break:** rewrites are for SEARCHING only. The answer model
+reads the user's own message plus the conversation. The first version gave the answer
+model the rewrite instead; the rewrite turned "ortalama" (GPA) into "ortalama xərclər"
+(average costs), and a question 08 answered correctly 3 times out of 3 was answered
+with a list of expenses.
+
+**D-006 narrowed:** general knowledge only for international standards (IELTS, CEFR,
+TOEFL, scale conversions). Terms specific to Azerbaijan or the programme (for example
+ÜOMG) are explained only from the documents. Reason: the bot, labelled "ümumi məlumat",
+claimed ÜOMG means high-school grades. That is false.
+
+**Result on 13 scripted messages (after the fix):** greeting, thanks and offtopic
+replies natural; "magistratura üçün ortalama" -> 81; the follow-up "bəs bakalavr
+üçün?" -> entrance-exam points 400/550; "79 ortalamam var, bəsdir?" -> Xeyr, 81.
+About 3 s and $0.0012 per message.
+
+**Still wrong:**
+- "pulsuz noutbuk verilirmi?" -> a confident "Xeyr", inferred from the list of funded
+  expenses. The documents never mention laptops. It should say what the documents do
+  cover and point to the email.
+- a Russian question gets an Azerbaijani answer, despite the rule
+- "bakalavr ortalamam..." answers only the bachelor case, not the master 81 case
+- in one run an answer dropped an important condition that an earlier run included
+- the bot says "Salam" again in the middle of a conversation
