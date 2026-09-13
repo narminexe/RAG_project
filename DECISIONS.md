@@ -455,3 +455,46 @@ Three offtopic controls still offtopic. PDF test: 12/12.
 
 **Open for the user:** the cost norms PDF is dated June 2022 and names the old "2022-2026"
 period. Are these amounts still current? The bot now states them with confidence.
+
+---
+
+## D-014 — Countries in the list note; words aimed at the bot are chat (2026-09-13)
+
+**Problems, found by the user in the Streamlit app:**
+- "yaponiya siyahida varr?" -> "Yaponiya ... siyahısında yoxdur". False: the 2026/2027 list
+  holds 81 Japanese programmes. The status note only said that the list exists, so the model guessed.
+- "rusvay olası bayquş" (an insult aimed at the owl avatar) -> Russia's monthly cost norms.
+  The understand step correctly said offtopic, but since D-012 offtopic still searches; search
+  matched "rusvay" to "Rusiya" and the answer model answered it.
+- the "Bu məlumat ... tarixinə olan vəziyyətdir" sentence appeared under cost answers.
+
+**Decision:**
+1. `spike/01b_list_status.py` parses the list PDF and adds the countries with programme counts
+   to the note: 33 countries, 4,121 rows (the PDF has exactly 4,121 level-word rows).
+   Universities are still not listed; "is University X on it?" still gets the PDF link.
+2. understand: words aimed at the bot (insults, praise, jokes, gibberish) are chat, so they
+   get a calm reply and skip search.
+3. offtopic messages that still go through search carry a warning to the answer model,
+   narrowed so questions about costs, countries or studying abroad are answered normally.
+4. the check-date sentence goes only on "has it been published?" answers.
+
+**Measured (2 runs each):**
+- countries: Yaponiya and İtaliya (on the list) -> "Bəli" with the programme count; Kanada,
+  Braziliya and Misir (checked absent in the PDF) -> no false yes. 10/10.
+- aimed at the bot: the insult, "sən çox axmaq botsan", gibberish, praise -> chat reply, no
+  search, no numbers. 8/8.
+- ABŞ and Türkiyə cost answers still right, without the date sentence. Regression suite 15/15.
+- forced-offtopic test (understand forced to say offtopic, so only the answer step decides):
+  16/16 with the first warning wording and 16/16 with the narrower one.
+
+**Not solved, found by reading the answers:**
+- PDF suite 11/12: "Fransada ev kirayəsinə nə qədər pul verirlər?" was labelled offtopic and
+  missed the 700 in 1 of 2 runs. Blaming the warning was NOT confirmed: the forced test answered
+  it 4/4 with both wordings. Cause under investigation.
+- "University of Edinburgh siyahıdadır?" once got "siyahıda ola bilər", which the rules forbid.
+  The automatic check only looked at the first word and missed it.
+- answers about countries not on the list start "Mətndə ... yoxdur" instead of a plain "Xeyr".
+- "sən çox axmaq botsan" -> "Təşəkkür edirəm, fikrinizə görə" reads as sarcastic.
+
+**Cost:** the note gained one ~1,300-character line; an offtopic message that goes through
+search costs about $0.002.

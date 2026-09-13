@@ -58,6 +58,16 @@ WELCOME = (
     "dp.edu.az saytında yoxlayın."
 )
 
+OFFTOPIC_NOTE = (
+    "QEYD: ilk addım bu mesajın proqramla əlaqəsiz ola biləcəyini təxmin etdi, amma bu, "
+    "yalnız təxmindir. Mesaj Dövlət Proqramı, xaricdə təhsil, xaricdə yaşayış xərcləri (kirayə, "
+    "yemək, nəqliyyat), ölkələr, universitetlər, sənədlər və ya tələblər haqqında HƏR HANSI "
+    "sualdırsa, adi qaydada cavab ver. Yalnız mesaj ümumiyyətlə sual deyilsə (bota deyilən söz, "
+    "təhqir, zarafat, anlaşılmaz mətn) və ya açıq-aydın başqa mövzudadırsa (idman, hava, filmlər, "
+    "kafe və restoran tövsiyəsi), mətndə oxşar söz olsa belə yalnız NO_ANSWER yaz."
+)
+
+
 NO_ANSWER_REPLY = (
     "Təəssüf ki, bu barədə rəsmi sənədlərdə məlumat tapa bilmədim. Dəqiq cavab üçün "
     f"Dövlət Proqramı İdarəetmə Qrupuna yazmağınızı tövsiyə edirəm: {CONTACT}"
@@ -67,7 +77,9 @@ UNDERSTAND_PROMPT = """Sən Xaricdə təhsil üzrə Dövlət Proqramı haqqında
 İstifadəçinin SON MESAJINI söhbətin kontekstində başa düş və YALNIZ JSON qaytar.
 
 Mesajın növləri:
-- "chat": salamlaşma, təşəkkür, sağollaşma, botun özü haqqında sual ("sən kimsən?").
+- "chat": salamlaşma, təşəkkür, sağollaşma, botun özü haqqında sual ("sən kimsən?"), bota
+  deyilən söz, tərif, təhqir və ya zarafat, heç bir sual olmayan anlaşılmaz mətn. Bunlara
+  qısa, sakit, nəzakətli cavab ver və proqramla bağlı sual verməyə dəvət et.
 - "programme": Dövlət Proqramı, xaricdə təhsil, müraciət, tələblər, xərclər, imtahanlar,
   sertifikatlar, universitetlər, siyahılar, elanlar, tarixlər, nəyin dərc olunub-olunmadığı
   və ya bunlarla bağlı anlayışlar haqqında istənilən sual - qısa və ya qeyri-müəyyən olsa
@@ -141,8 +153,11 @@ QAYDALAR:
   istifadəçinin soruşduğu tədris ili ilə müqayisə et. İstifadəçi il deməyibsə, mətndəki ən
   son ili götür. Dərc olunubsa, bunu de və linki ver. Soruşulan il üçün mətndə dərc
   olunduğu yazılmayıbsa, hələ dərc olunmadığını, saytda hansı ilin siyahısı olduğunu de və
-  dp.edu.az saytını bir müddət sonra yoxlamağı tövsiyə et. Belə cavabların sonunda mütləq
+  dp.edu.az saytını bir müddət sonra yoxlamağı tövsiyə et. YALNIZ dərc olunma vəziyyəti haqqında cavabların sonunda mütləq
   ayrıca cümlə yaz: "Bu məlumat <mətndəki yoxlanılma tarixi> tarixinə olan vəziyyətdir."
+- Konkret ölkənin siyahıda olub-olmadığı soruşulursa: mətndə siyahıdakı ölkələr sadalanıbsa,
+  ona əsasən "Bəli" (neçə proqram olduğunu da de) və ya "Xeyr" de və siyahının linkini ver.
+  Mətndə ölkələr sadalanmayıbsa, "bəli", "xeyr" və ya "ola bilər" demə - yalnız linki ver.
 - Konkret universitetin və ya proqramın siyahıda olub-olmadığı soruşulursa və həmin ad
   mətndə yoxdursa: "bəli", "xeyr" və ya "ola bilər" demə. Siyahının linkini ver və adı
   həmin siyahıda axtarmağı tövsiyə et.
@@ -160,6 +175,7 @@ SÖHBƏTİN SONU:
 
 İSTİFADƏÇİNİN SON MESAJI: {message}
 (Botun anladığı sual, təxmini: {question})
+{offtopic_note}
 
 CAVAB:"""
 
@@ -288,7 +304,8 @@ def chat(message, history=None):
         info["read_chars"] = len(context)
         text = rag._chat(rag.ANSWER_MODEL, ANSWER_PROMPT.format(
             context=context, history=_format_history(history), message=message, question=question,
-            today=time.strftime("%d.%m.%Y")), usage)
+            today=time.strftime("%d.%m.%Y"),
+            offtopic_note=OFFTOPIC_NOTE if suggested_offtopic else ""), usage)
         refused = "NO_ANSWER" in text or _says_only_no_info(text)
         if refused and suggested_offtopic and str(data.get("reply", "")).strip():
             reply, info["type"] = data["reply"].strip(), "offtopic"
