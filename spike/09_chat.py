@@ -33,6 +33,7 @@ Run:  .venv\Scripts\python.exe spike\09_chat.py               (chat - type "çı
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 import time
 
@@ -45,6 +46,9 @@ _spec.loader.exec_module(rag)
 
 HISTORY_TURNS = 3                     # previous question/answer pairs the bot remembers
 CONTACT = "dp22-28@edu.gov.az"
+READ_BIG = True                       # search small, read big (D-010). False = old behaviour
+PAGE_LIMIT = 4000                     # pages up to this many characters are given whole
+NEIGHBOURS = 1                        # longer pages: the chosen chunk plus this many on each side
 
 WELCOME = (
     "Salam! Mən Xaricdə təhsil üzrə Dövlət Proqramı ilə bağlı suallarınıza cavab "
@@ -65,9 +69,11 @@ UNDERSTAND_PROMPT = """Sən Xaricdə təhsil üzrə Dövlət Proqramı haqqında
 Mesajın növləri:
 - "chat": salamlaşma, təşəkkür, sağollaşma, botun özü haqqında sual ("sən kimsən?").
 - "programme": Dövlət Proqramı, xaricdə təhsil, müraciət, tələblər, xərclər, imtahanlar,
-  sertifikatlar, universitetlər və ya bunlarla bağlı anlayışlar haqqında istənilən sual.
-  Şübhə edirsənsə, "programme" seç.
-- "offtopic": Dövlət Proqramı və xaricdə təhsillə heç bir əlaqəsi olmayan mövzu.
+  sertifikatlar, universitetlər, siyahılar, elanlar, tarixlər, nəyin dərc olunub-olunmadığı
+  və ya bunlarla bağlı anlayışlar haqqında istənilən sual - qısa və ya qeyri-müəyyən olsa
+  belə (məsələn, "elan çıxıb?"). Şübhə edirsənsə, "programme" seç.
+- "offtopic": yalnız Dövlət Proqramı və xaricdə təhsillə AÇIQ-AYDIN heç bir əlaqəsi olmayan
+  mövzu (məsələn, yemək, idman, hava).
 
 JSON sahələri:
 - "type": yuxarıdakı növlərdən biri.
@@ -80,6 +86,9 @@ JSON sahələri:
   hissəni əlavə et (məsələn, əvvəl magistratura soruşulubsa, "bəs bakalavr üçün?" -> eyni
   mövzunu bakalavriat üçün soruşan sual). Söhbət yoxdursa və ya mesaj özü tamdırsa, onu
   olduğu kimi saxla, yalnız yazı səhvlərini düzəlt.
+  Qısa davam sualında ("bəs ...?", "nə vaxt?", "harada?") mövzu mesajın özündə deyilmirsə,
+  mövzunu söhbətdən götürüb sualda ADI İLƏ yaz (məsələn, əvvəl aylıq yaşayış xərcindən
+  danışılıbsa, "bəs nə qədərdir?" -> "Aylıq yaşayış xərci nə qədərdir?").
 - "search": yalnız "programme" üçün - sualın 3 fərqli yazılışı: (1) dövlət sənədlərinin
   rəsmi dilində, (2) sadə dildə, (3) ən çox ehtimal olunan mənanı açıq göstərməklə
   (hansı təhsil səviyyəsi, hansı xərc və s.).
@@ -125,9 +134,22 @@ QAYDALAR:
   cavab varsa, hər hal üçün ayrıca qısa cavab ver.
 - Mətndə sualın mövzusu haqqında heç nə yoxdursa, "bəli" və ya "xeyr" deyərək cavab
   uydurma. Proqram məlumatı mətndə yoxdursa, yalnız NO_ANSWER yaz, başqa heç nə yazma.
+  Cavabının bütün mənası "bu barədə məlumat yoxdur" olacaqsa, onu öz sözlərinlə yazma -
+  yalnız NO_ANSWER yaz.
+- Siyahının və ya elanın dərc olunub-olunmadığı soruşulursa: mətndəki tədris ilini
+  istifadəçinin soruşduğu tədris ili ilə müqayisə et. İstifadəçi il deməyibsə, mətndəki ən
+  son ili götür. Dərc olunubsa, bunu de və linki ver. Soruşulan il üçün mətndə dərc
+  olunduğu yazılmayıbsa, hələ dərc olunmadığını, saytda hansı ilin siyahısı olduğunu de və
+  dp.edu.az saytını bir müddət sonra yoxlamağı tövsiyə et. Belə cavabların sonunda mütləq
+  ayrıca cümlə yaz: "Bu məlumat <mətndəki yoxlanılma tarixi> tarixinə olan vəziyyətdir."
+- Konkret universitetin və ya proqramın siyahıda olub-olmadığı soruşulursa və həmin ad
+  mətndə yoxdursa: "bəli", "xeyr" və ya "ola bilər" demə. Siyahının linkini ver və adı
+  həmin siyahıda axtarmağı tövsiyə et.
 - İstifadəçinin son mesajının dilində cavab ver.
 - Proqram məlumatı istifadə etmisənsə, sonda ayrıca sətirdə yaz: Mənbə: <istifadə etdiyin
   səhifənin linki>. Linki mötərizəsiz, sadə yaz.
+
+BUGÜNKÜ TARİX: {today}
 
 MƏTN:
 {context}
@@ -171,6 +193,69 @@ def understand(message, history, usage):
     return kind, data
 
 
+def _says_only_no_info(text):
+    """Safety net: the model sometimes writes "məlumat mətndə yoxdur" in its own words
+    instead of the NO_ANSWER marker. A SHORT reply that only says "there is no
+    information" - with no "amma/lakin", so it is not a partial answer - is treated as
+    a refusal, so the user still gets the friendly message and the email."""
+    body = "\n".join(line for line in text.splitlines()
+                     if not line.strip().lower().startswith("mənbə"))
+    no_info = re.search(r"(məlumat|informasiya)[^.]{0,40}(yoxdur|tapılmadı|göstərilməyib|qeyd olunmayıb)",
+                        body, re.IGNORECASE)
+    partial = re.search(r"\b(amma|lakin|ancaq|bununla belə)\b", body, re.IGNORECASE)
+    return bool(no_info) and not partial and len(body.strip()) < 220
+
+
+_corpus = {}
+
+
+def _load_corpus():
+    """The chunk and page files, loaded once. Chroma ids are "chunk-N" = position N in
+    spike_chunks.json, because 06_index_chroma.py numbers them in that order."""
+    if not _corpus:
+        base = rag.ROOT / "data" / "processed"
+        _corpus["chunks"] = json.loads((base / "spike_chunks.json").read_text(encoding="utf-8"))
+        _corpus["pages"] = {d["doc_id"]: d for d in
+                            json.loads((base / "spike_docs.json").read_text(encoding="utf-8"))}
+    return _corpus
+
+
+def read_big(chosen):
+    """SEARCH SMALL, READ BIG. Search finds small chunks because they match precisely, but
+    a small chunk can miss the sentence right next to it. Content/70 says "the participant
+    pays the visa fee" in one chunk and "and gets it refunded" in the next one; given only
+    the first, the bot answered that visa costs are NOT covered.
+
+    So the model reads more than the chunk that matched:
+      - a page up to PAGE_LIMIT characters -> the whole page
+      - a longer page (the FAQ)            -> the chosen chunk plus its neighbours
+    Returns (url, text) blocks, each short page at most once."""
+    corpus = _load_corpus()
+    chunks, pages = corpus["chunks"], corpus["pages"]
+    blocks, whole_pages, used_chunks = [], set(), set()
+    for cid, doc, meta in chosen:
+        doc_id = meta["doc_id"]
+        page = pages.get(doc_id)
+        if doc_id in whole_pages:
+            continue
+        if page and len(page["text"]) <= PAGE_LIMIT:
+            whole_pages.add(doc_id)
+            blocks.append((meta["url"], page["text"]))
+            continue
+        n = int(cid.rsplit("-", 1)[1])
+        if not (0 <= n < len(chunks)) or chunks[n]["doc_id"] != doc_id:
+            blocks.append((meta["url"], doc))            # index and chunk file out of step
+            continue
+        ids = [i for i in range(n - NEIGHBOURS, n + NEIGHBOURS + 1)
+               if 0 <= i < len(chunks) and chunks[i]["doc_id"] == doc_id and i not in used_chunks]
+        used_chunks.update(ids)
+        if ids:
+            opening = " ".join(page["text"][:300].split()) if page else ""
+            body = "\n".join(chunks[i]["body"] for i in ids)
+            blocks.append((meta["url"], f"{opening}\n---\n{body}" if opening else body))
+    return blocks
+
+
 def chat(message, history=None):
     """One message in, one reply out. `history` is updated in place."""
     history = [] if history is None else history
@@ -186,14 +271,20 @@ def chat(message, history=None):
         question = str(data.get("question") or message).strip()
         searches = [s for s in data.get("search", []) if isinstance(s, str) and s.strip()]
         # SEARCH with the user's own words AND the rewrites; the rewrites never reach the answer.
-        queries = list(dict.fromkeys([message, question] + searches[:rag.N_REWRITES]))
+        previous = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
+        extra = [f"{previous} {message}"] if previous else []   # a follow-up keeps its topic in search
+        queries = list(dict.fromkeys([message, question] + searches[:rag.N_REWRITES] + extra))
         pick_question = message if question == message else f"{message}\n(tam sual: {question})"
+        if previous:
+            pick_question += f"\n(əvvəlki sual: {previous})"
         chosen = rag.pick(pick_question, rag.search(queries), usage)
-        context = "\n\n".join(f"[mənbə {n}] {meta['url']}\n{doc}"
-                              for n, (_, doc, meta) in enumerate(chosen, 1))
+        blocks = read_big(chosen) if READ_BIG else [(meta["url"], doc) for _, doc, meta in chosen]
+        context = "\n\n".join(f"[mənbə {n}] {url}\n{body}" for n, (url, body) in enumerate(blocks, 1))
+        info["read_chars"] = len(context)
         text = rag._chat(rag.ANSWER_MODEL, ANSWER_PROMPT.format(
-            context=context, history=_format_history(history), message=message, question=question), usage)
-        refused = "NO_ANSWER" in text
+            context=context, history=_format_history(history), message=message, question=question,
+            today=time.strftime("%d.%m.%Y")), usage)
+        refused = "NO_ANSWER" in text or _says_only_no_info(text)
         reply = NO_ANSWER_REPLY if refused else text
         info.update(question=question, searches=searches, refused=refused,
                     chosen=[(cid, meta["doc_id"]) for cid, _, meta in chosen])

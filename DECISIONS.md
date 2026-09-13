@@ -289,3 +289,87 @@ About 3 s and $0.0012 per message.
 - "bakalavr ortalamam..." answers only the bachelor case, not the master 81 case
 - in one run an answer dropped an important condition that an earlier run included
 - the bot says "Salam" again in the middle of a conversation
+
+---
+
+## D-009 — University list: a publication-status note, not the full list (2026-09-13)
+
+**Decision:** do not index the 50-page university and programme list (996 chunks).
+Instead `spike/01b_list_status.py` checks the dp.edu.az homepage during ingestion and
+writes one short note: which academic year's list is published, the PDF link, that the
+next year's list is not published yet, and the date it was checked.
+
+**Why:** from applying herself, the user estimates 98-99% of real questions are "has the
+list been published?", not "is University X on it?". The full list would add 996
+look-alike chunks that crowd other answers out of search. For the rare "is X on it?"
+question, the PDF link is a better answer than a chunk.
+
+**Answer rules added in `spike/09_chat.py`:**
+- compare the academic year asked about with the note; published -> say so and give the
+  link; not published -> say not yet, say which year is on the site, suggest checking
+  later; always end with the check date. Today's date is given to the model.
+- "is University X on the list?" -> never yes, no or maybe; give the link and suggest
+  searching for the name inside it.
+
+**Also fixed while testing:**
+- the understand step classified "siyahı çıxıb?" as offtopic, which broke the follow-up
+  after it. Lists, announcements, dates and publication status now count as programme
+  topics, and offtopic means clearly unrelated (food, sport, weather).
+- the model kept writing "məlumat mətndə yoxdur" instead of the NO_ANSWER marker, even
+  after being told twice in the prompt. A safety net in code now turns a short reply that
+  only says "no information" (with no amma/lakin, so not a partial answer) into the
+  friendly refusal with the email. Unit-checked so that a partial answer such as
+  "IELTS balı göstərilməyib, lakin C1 tələb olunur" is not swallowed.
+
+**Result:** 15/15 auto-checks over 17 messages: 7 list-status questions (including two
+phrasings written only after the fixes: Harvard, "haradan tapa bilərəm"), a 3-turn
+conversation with a follow-up, and a regression set (81; 79 -> Xeyr; Təqaüd; the IELTS
+partial answer; two not-in-documents questions -> friendly refusal).
+
+**Limits:**
+- the note is only as fresh as the last ingestion run. There is no automatic refresh yet.
+- "next year not published" is inferred from the newest year linked on the homepage. If
+  the site changes its layout or link wording, the step writes a "not found" note.
+- one answer labelled an official fact (the C1 requirement) as general information.
+
+---
+
+## D-010 — Search small, read big (2026-09-13)
+
+**Trigger:** the condition set when this was deferred. An answer failed because the
+deciding sentence sat in a neighbouring chunk. Asked "dövlət proqramı viza xərcini
+qarşılayır?", the bot said "Xeyr". content/70 says in one chunk "the participant pays the
+visa fee" and in the next "and it is refunded against receipts". Search returned the first
+chunk in 3 of 3 runs and never the second, because the second never uses the word "viza".
+
+**Decision:** search is unchanged (small chunks match precisely). The answer model reads
+more: a page up to 4,000 characters is given whole; a longer page (the FAQ) is given as the
+chosen chunk plus one neighbour on each side. `READ_BIG` in `spike/09_chat.py` switches it off.
+
+**Measured on the same questions, 2 runs each:**
+
+| question | chunks only | read big |
+|---|---|---|
+| viza xərcini qarşılayır? | Xeyr / covered | covered + refund / covered + refund |
+| təhsil haqqını kim ödəyir? | one run: "the student pays first"; other run slipped in "you pay the visa yourself" | paid to the university, refunded if you paid it yourself (both runs) |
+| tibbi sığorta, bilet, yataqxana | covered | covered |
+
+Text read per question: about 3,100 -> 4,100-8,100 characters. Cost: about +$0.0002-0.0006.
+
+**Regression (15-check suite):** 13/15. Everything that worked still works. Two answers
+changed: "pulsuz noutbuk / telefon verilirmi?" now get "nəzərdə tutulmayıb" (not provided),
+inferred from the complete list of funded costs, instead of the friendly refusal with the
+email. OPEN for the user: accept that inference, or refuse and point to the email? The
+monthly allowance does include "tədris materialları ilə təminat".
+
+**Follow-up fix, tried in the same session:** the understand step must name the topic in a
+short follow-up, and the previous user question is added as one extra search query.
+5 follow-up pairs x 2 runs: 9/10 before, 9/10 after. Rewritten follow-ups clearly improved
+("neçə dəfə?" -> "Təyyarə bileti neçə dəfə ödənilir?") and the topic-switch control
+(tickets -> "IELTS nədir?") stayed correct. But visa -> "bəs geri ödəmir?" still fails 1 run
+in 2: the rewrite dropped "viza" again and the answer followed the FAQ rule that only
+current-year tuition is refunded. Kept; benefit unproven.
+
+**Also found:** content/74 (refunds) gives the email dp22-26@edu.gov.az, while the FAQ and
+the contact page give dp22-28@edu.gov.az. The site contradicts itself, and the bot is
+faithful to the page it read. OPEN for the user: which address is current.
