@@ -1,0 +1,16 @@
+# Colours from dp.edu.az. base = "light" so the page looks the same for people
+# whose computer is in dark mode.
+[theme]
+base = "light"
+primaryColor = "#9B8B53"
+backgroundColor = "#FCF8ED"
+secondaryBackgroundColor = "#EAE6DB"
+textColor = "#202020"
+
+[browser]
+gatherUsageStats = false
+
+# The file watcher inspects every loaded module and fills the log with
+# "No module named 'torchvision'" from transformers. Refresh the page after editing instead.
+[server]
+fileWatcherType = "none"

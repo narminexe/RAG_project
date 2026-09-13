@@ -28,6 +28,8 @@ pandas==3.0.5
 numpy==2.5.3
 python-dotenv==1.2.3
 
+# --- Interface (app.py) ---
+streamlit==1.63.0
+
 # --- Not yet added ---
 # ragas       Phase 3.2 generation metrics
-# streamlit   Phase 5.1 interface
