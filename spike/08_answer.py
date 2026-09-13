@@ -50,7 +50,14 @@ load_dotenv(ROOT / ".env")
 EMBED_MODEL  = "LocalDoc/LocRet-small"  # must match 06_index_chroma.py (D-002)
 SEARCH_MODEL = "gpt-4o-mini"            # steps 1 and 3 - cheap, fast, worked well
 ANSWER_MODEL = "gpt-4.1-mini"           # step 4 - best of 4 models tested (D-005)
-BASE_URL     = None                     # "http://localhost:11434/v1" = local Ollama
+BASE_URL     = None
+
+# To use the local Qwen model instead of GPT, set LLM_PROVIDER=qwen before starting.
+# Qwen runs through Ollama and must be downloaded first: ollama pull qwen3:4b
+PROVIDER = os.getenv("LLM_PROVIDER", "gpt")
+if PROVIDER == "qwen":
+    SEARCH_MODEL = ANSWER_MODEL = "qwen3:4b"
+    BASE_URL = "http://localhost:11434/v1"
 
 N_REWRITES = 3    # extra versions of the question
 PER_QUERY  = 50   # chunks fetched for each version
