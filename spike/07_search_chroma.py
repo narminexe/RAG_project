@@ -1,8 +1,8 @@
 r"""
 SPIKE STEP 7 - Search the vector store (tutorial step 5, database version).
 
-Same job as 03_search.py, but the chunk vectors are read from disk instead of
-being recomputed. Only the QUESTION gets embedded now - one short string.
+The chunk vectors were computed once by 06_index_chroma.py and are read from disk
+here instead of being recomputed. Only the QUESTION gets embedded - one short string.
 
 Run:  .venv\Scripts\python.exe spike\07_search_chroma.py "your question"
       .venv\Scripts\python.exe spike\07_search_chroma.py "your question" dp-content-65
@@ -46,7 +46,7 @@ print("=" * 78)
 for rank, (doc, meta, dist) in enumerate(
         zip(result["documents"][0], result["metadatas"][0], result["distances"][0]), start=1):
     # Chroma reports DISTANCE (smaller = closer). With cosine space,
-    # similarity = 1 - distance, which puts it back on 03_search.py's scale.
+    # similarity = 1 - distance: 1.0 = same meaning, 0.0 = unrelated.
     similarity = 1 - dist
     print(f"#{rank}  similarity {similarity:.4f}   [{meta['doc_id']}]")
     print(f"    {doc.replace(chr(10), ' / ')[:95]}...")

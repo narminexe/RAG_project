@@ -2,8 +2,8 @@ r"""
 SPIKE STEP 6 - Build the vector store (tutorial step 4).
 
 Embed every chunk ONCE and save the vectors to disk in Chroma.
-Compare with 03_search.py, which re-embeds all chunks on every single run and
-throws the result away when the script exits.
+Without a store, every search would re-embed all chunks on every single run and
+throw the result away when the script exits.
 
 IMPORTANT: Chroma has a built-in embedding model (all-MiniLM-L6-v2) and it is
 ENGLISH-ONLY. If we let Chroma embed for us, Azerbaijani retrieval would be
@@ -44,9 +44,9 @@ client = chromadb.PersistentClient(path=DB_DIR)
 if COLLECTION in [c.name for c in client.list_collections()]:
     client.delete_collection(COLLECTION)
 
-# "hnsw:space": "cosine" makes Chroma measure distance the same way
-# 03_search.py did. The default is squared L2, which would give different
-# numbers and quietly break any comparison between the two scripts.
+# "hnsw:space": "cosine" makes Chroma measure distance with cosine similarity,
+# the same scale as the scores recorded in DECISIONS.md D-002. The default is
+# squared L2, which would give different numbers and quietly break that comparison.
 collection = client.create_collection(
     name=COLLECTION,
     metadata={"hnsw:space": "cosine"},
