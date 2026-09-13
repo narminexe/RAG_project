@@ -1,4 +1,4 @@
-# Dövlət Proqramı chatbot
+# 🦉Dövlət Proqramı chatbot
 
 A simple RAG chatbot for the State Programme of the Republic of Azerbaijan on education abroad.
 
