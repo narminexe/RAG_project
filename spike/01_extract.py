@@ -8,10 +8,17 @@ import json
 import pathlib
 from bs4 import BeautifulSoup
 
+# Known outdated details on dp.edu.az, corrected at extraction (DECISIONS.md D-011).
+# content/74 still gives the address from the 2022-2026 period; the FAQ and the contact
+# page give dp22-28, which the user (a programme participant) confirmed is current.
+# The raw HTML in data/raw is left untouched as the record of what the site says.
+CORRECTIONS = {"dp22-26@edu.gov.az": "dp22-28@edu.gov.az"}
+
 rows = [r for r in csv.DictReader(open("data/sources.csv", encoding="utf-8"))
         if r["type"] == "html" and int(r["chars"] or 0) > 200]
 
 documents, missing, empty = [], [], []
+corrected = 0
 
 for row in rows:
     path = pathlib.Path("data/raw") / f"{row['doc_id']}.html"
@@ -37,6 +44,10 @@ for row in rows:
         empty.append(row["doc_id"])
         continue
 
+    for old, new in CORRECTIONS.items():
+        corrected += text.count(old)
+        text = text.replace(old, new)
+
     documents.append({"doc_id": row["doc_id"], "url": row["url"],
                       "title": row["title"], "text": text})
 
@@ -51,3 +62,4 @@ for d in documents[:8]:
 print(f"  ... and {max(0, len(documents)-8)} more")
 if empty:   print(f"\nNO USABLE TEXT (check these by hand): {', '.join(empty)}")
 if missing: print(f"NOT DOWNLOADED: {', '.join(missing)}")
+print(f"corrections applied: {corrected}")

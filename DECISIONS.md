@@ -373,3 +373,85 @@ current-year tuition is refunded. Kept; benefit unproven.
 **Also found:** content/74 (refunds) gives the email dp22-26@edu.gov.az, while the FAQ and
 the contact page give dp22-28@edu.gov.az. The site contradicts itself, and the bot is
 faithful to the page it read. OPEN for the user: which address is current.
+
+---
+
+## D-011 — Current contact email: dp22-28@edu.gov.az (2026-09-13)
+
+**Decision:** dp22-28@edu.gov.az is the programme's current address. `spike/01_extract.py`
+replaces the old dp22-26@edu.gov.az while extracting pages.
+
+**Why:** content/74 (refunds) still gives dp22-26, left over from the 2022-2026 programme
+period. The FAQ and the contact page give dp22-28. The user, a programme participant,
+confirmed dp22-28 is current. Before this, the bot quoted dp22-26 whenever it read content/74.
+
+**How:** a small CORRECTIONS table applied at extraction, so every later step (chunks,
+index, both chat scripts) sees the corrected text. The raw HTML in data/raw stays untouched
+as the record of what the site actually says.
+
+**What would change my mind:** the site fixing content/74, or the programme announcing a
+new address.
+
+**Still open from D-010:** for laptop and telephone questions, keep the inferred
+"nəzərdə tutulmayıb", or give the friendly refusal with the email.
+
+---
+
+## D-012 — "Offtopic" is a suggestion, not a gate (2026-09-13)
+
+**Problem:** the understand step labelled some real programme questions as offtopic, and an
+offtopic label skipped search entirely, so one wrong label meant a guaranteed wrong answer.
+After the three homepage PDFs were added, "ABŞ-da aylıq xərc norması nə qədərdir?",
+"Türkiyədə qidalanma üçün nə qədər pul verilir?" and "Fransada ev kirayəsinə nə qədər pul
+verirlər?" all got the polite offtopic reply. The ABŞ question had been answered correctly in
+the run before, so the label flips between runs. Rewording the offtopic examples did not help;
+it made it worse, because an earlier example listed "yemək" (food) as offtopic.
+
+**Decision:** in `spike/09_chat.py` only "chat" (greetings, thanks) skips search. An offtopic
+label now just means: search anyway, and if the documents have nothing, show the polite
+offtopic reply instead of the refusal with the email.
+
+**Measured:** money questions labelled offtopic went from 3 of 5 (one run) to 0 of 8 (two runs
+each). Three real offtopic controls (a café in Baku, tomorrow's weather, a football match) still
+got the offtopic reply. Regression suite: 15/15.
+
+**Cost:** an offtopic message now runs the full pipeline, about $0.002 instead of about $0.0002.
+
+**Still failing after this:** Türkiyə food and Fransa rent now reach search but get "no
+concrete number in the text". The costs table is not among the pages the model reads. Next step.
+
+---
+
+## D-013 — Three homepage PDFs added; the costs table becomes one sentence per row (2026-09-13)
+
+**Decision:** new ingestion step `spike/01c_pdfs.py` adds three PDFs linked from the
+homepage: the May 2026 selection criteria and required documents (holds the deadline),
+the monthly cost norms by country (a table), and doktorantura. Skipped: the April 2026
+announcement (an older version of the May one) and the university list (covered by D-009).
+Order: 00_download -> 01_extract -> 01b_list_status -> 01c_pdfs -> 02_chunk -> 06_index_chroma.
+
+**The table problem, found by measuring, not guessed:** read as plain text, the costs table
+becomes "41. | Portuqaliya | avro | 1200 | 600 | 450 | 50 | 100 | 42. | Polşa | ...", and the
+column names appear only once, on page 1. For "Türkiyədə qidalanma üçün nə qədər pul
+verilir?" search worked: the top 4 results were table chunks, the Türkiyə chunk ranked 2 of
+302. The PICK step dropped all of them, because nothing in a chunk said which number is food
+and which is rent, and kept text pages that talk about food but have no numbers.
+
+**Fix:** each of the 52 table rows becomes a self-contained sentence carrying its own column
+names: "Türkiyə üçün aylıq xərc norması: 1300 ABŞ dolları. Bundan yataqxana (mənzil kirayəsi)
+500, qidalanma 600, tədris materialları ilə təminat 100, digər xərclər 100 ABŞ dolları."
+
+**Measured** (answers checked against numbers read straight from the PDF table, 2 runs each):
+
+| question | plain table text | one sentence per row |
+|---|---|---|
+| son müraciət tarixi | 05.06.2026, 18:00 | same |
+| ABŞ aylıq norma | 1800 | 1800, 1800 |
+| Almaniya yataqxana | 700 | 700, 700 |
+| Türkiyə qidalanma | "no concrete number" x2 | 600, 600 |
+| Fransa kirayə | "no concrete number" x2 | 700, 700 |
+
+Three offtopic controls still offtopic. PDF test: 12/12.
+
+**Open for the user:** the cost norms PDF is dated June 2022 and names the old "2022-2026"
+period. Are these amounts still current? The bot now states them with confidence.

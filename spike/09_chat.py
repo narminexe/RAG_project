@@ -73,7 +73,8 @@ Mesajın növləri:
   və ya bunlarla bağlı anlayışlar haqqında istənilən sual - qısa və ya qeyri-müəyyən olsa
   belə (məsələn, "elan çıxıb?"). Şübhə edirsənsə, "programme" seç.
 - "offtopic": yalnız Dövlət Proqramı və xaricdə təhsillə AÇIQ-AYDIN heç bir əlaqəsi olmayan
-  mövzu (məsələn, yemək, idman, hava).
+  mövzu (məsələn, idman, hava, filmlər). Xaricdə yaşayış xərcləri - yemək, kirayə, nəqliyyat,
+  ölkələr üzrə məbləğlər - haqqında suallar offtopic DEYİL, proqramın maliyyələşdirməsinə aiddir.
 
 JSON sahələri:
 - "type": yuxarıdakı növlərdən biri.
@@ -264,9 +265,13 @@ def chat(message, history=None):
     kind, data = understand(message, history, usage)
     info = {"type": kind}
 
-    if kind in ("chat", "offtopic") and str(data.get("reply", "")).strip():
+    if kind == "chat" and str(data.get("reply", "")).strip():
         reply = data["reply"].strip()
     else:
+        # "offtopic" is only a suggestion (D-012). Search runs anyway, and the polite off-topic
+        # reply is used only if the documents have nothing. It used to skip search entirely, so
+        # one wrong label ("ABŞ-da aylıq xərc norması" -> offtopic) meant a guaranteed wrong answer.
+        suggested_offtopic = kind == "offtopic"
         info["type"] = "programme"
         question = str(data.get("question") or message).strip()
         searches = [s for s in data.get("search", []) if isinstance(s, str) and s.strip()]
@@ -285,7 +290,10 @@ def chat(message, history=None):
             context=context, history=_format_history(history), message=message, question=question,
             today=time.strftime("%d.%m.%Y")), usage)
         refused = "NO_ANSWER" in text or _says_only_no_info(text)
-        reply = NO_ANSWER_REPLY if refused else text
+        if refused and suggested_offtopic and str(data.get("reply", "")).strip():
+            reply, info["type"] = data["reply"].strip(), "offtopic"
+        else:
+            reply = NO_ANSWER_REPLY if refused else text
         info.update(question=question, searches=searches, refused=refused,
                     chosen=[(cid, meta["doc_id"]) for cid, _, meta in chosen])
 
