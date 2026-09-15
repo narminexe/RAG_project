@@ -25,15 +25,15 @@ The bot is tested on 34 questions a real applicant would ask (25 in Azerbaijani,
 
 I grade every reply by hand: the set is small, and I know the programme. Retrieval metrics need no grading.
 
-| | Metric | Before the check | Now | What it means |
-|---|---|---|---|---|
-| Retrieval | hit@5 | 0.84 | 0.82 | a right page was among the pages the bot read |
-| | recall@5 | 0.74 | 0.74 | share of all right pages that the bot read |
-| | precision@5 | 0.48 | 0.44 | share of the pages read that were right. Most questions have one right page, so about 0.5 is close to the best possible |
-| | MRR | 0.78 | 0.75 | how high the first right page was ranked (1st = 1, 2nd = 0.5) |
-| Generation | answer correctness | not graded yet | not graded yet | the reply was correct |
-| | faithfulness | not graded yet | not graded yet | the reply had no made-up programme facts |
-| | refusal accuracy | not graded yet | not graded yet | the bot said "I don't know" when its pages didn't have the answer |
+| | Metric | Score | What it means |
+|---|---|---|---|
+| Retrieval | hit@5 | 0.82 | a right page was among the pages the bot read |
+| | recall@5 | 0.74 | share of all right pages that the bot read |
+| | precision@5 | 0.44 | share of the pages read that were right. Most questions have one right page, so about 0.5 is close to the best possible |
+| | MRR | 0.75 | how high the first right page was ranked (1st = 1, 2nd = 0.5) |
+| Generation | answer correctness | not graded yet | the reply was correct |
+| | faithfulness | not graded yet | the reply had no made-up programme facts |
+| | refusal accuracy | not graded yet | the bot said "I don't know" when its pages didn't have the answer |
 
 Retrieval is measured on the 19 answerable questions, asked twice (38 replies). Generation comes from my hand grades; the current bot's replies are waiting in `results/eval/2026-09-15_145820/grades.csv`.
 

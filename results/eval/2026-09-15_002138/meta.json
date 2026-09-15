@@ -1,9 +1,0 @@
-{
-  "date": "2026-09-15 00:21",
-  "questions": 34,
-  "runs": 2,
-  "answer_model": "gpt-4.1-mini",
-  "search_model": "gpt-4o-mini",
-  "base_url": null,
-  "read_big": true
-}
