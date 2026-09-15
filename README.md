@@ -31,11 +31,11 @@ I grade every reply by hand: the set is small, and I know the programme. Retriev
 | | recall@5 | 0.74 | share of all right pages that the bot read |
 | | precision@5 | 0.44 | share of the pages read that were right. Most questions have one right page, so about 0.5 is close to the best possible |
 | | MRR | 0.75 | how high the first right page was ranked (1st = 1, 2nd = 0.5) |
-| Generation | answer correctness | not graded yet | the reply was correct |
-| | faithfulness | not graded yet | the reply had no made-up programme facts |
-| | refusal accuracy | not graded yet | the bot said "I don't know" when its pages didn't have the answer |
+| Generation | answer correctness | 0.59 | the reply was correct |
+| | faithfulness | 0.97 | the reply had no hallucinated programme facts |
+| | refusal accuracy | 0.53 | the bot said "I don't know" when its pages didn't have the answer |
 
-Retrieval is measured on the 19 answerable questions, asked twice (38 replies). Generation comes from my hand grades; the current bot's replies are waiting in `results/eval/2026-09-15_145820/grades.csv`.
+Retrieval is measured on the 19 answerable questions, asked twice (38 replies). Generation comes from my hand grades of the 34 replies in `results/eval/2026-09-15_145820/grades.csv`.
 
 Weak spots the evaluation found:
 - Search misses a few pages: the yearly quota (dp-content-78), and Korea inside the list of 33 countries.

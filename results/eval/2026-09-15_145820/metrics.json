@@ -1,13 +1,12 @@
 {
   "run": "2026-09-15_145820",
-  "judge": "gpt-5.4 / prompt f0fa4f",
-  "retrieval (answers with a right page)": 38,
+  "retrieval (replies with a right page)": 38,
   "hit@5": 0.82,
   "recall@5": 0.74,
   "precision@5": 0.44,
   "MRR": 0.75,
-  "generation (graded answers)": 68,
-  "answer correctness": 0.57,
-  "faithfulness": 0.91,
-  "refusal accuracy": 0.67
+  "generation (graded replies)": "34 of 68",
+  "answer correctness": 0.59,
+  "faithfulness": 0.97,
+  "refusal accuracy": 0.53
 }
