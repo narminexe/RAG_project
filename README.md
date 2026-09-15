@@ -41,6 +41,10 @@ Weak spots the evaluation found:
 - Search misses a few pages: the yearly quota (dp-content-78), and Korea inside the list of 33 countries.
 - English and Russian questions get their reply in Azerbaijani.
 - The check sometimes turns a correct answer into "I don't know".
+- Short questions typed without Azerbaijani letters ("kesilsek ne olur?") are taken for small talk and get "Salam!".
+- Some questions it should refuse get "Bağışlayın, yalnız Dövlət Proqramı..." without the contact email.
+
+How the evaluation was designed, and why the grading is done by hand, is in [DECISIONS.md](DECISIONS.md) (D-015 to D-017).
 
 To run the evaluation, first ask the bot every question (about $0.11):
 
@@ -48,7 +52,7 @@ To run the evaluation, first ask the bot every question (about $0.11):
 .venv\Scripts\python.exe spike\10_eval_run.py
 ```
 
-Then grade the replies in `grades.csv` in the new `results/eval/` folder: `grade` is correct, partly or wrong, and `made_up` is yes if the reply states a programme fact that isn't on the pages it read. Then compute the metrics:
+Then grade the replies in `grades.csv` in the new `results/eval/` folder: `grade` is correct, partly or wrong, and `made_up` is yes if the reply hallucinates, meaning it states a programme fact that isn't on the pages it read. Then compute the metrics:
 
 ```bash
 .venv\Scripts\python.exe spike\11_eval_metrics.py
