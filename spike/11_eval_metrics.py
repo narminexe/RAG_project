@@ -67,6 +67,8 @@ made_up = lambda r: sheet[(r["id"], r["run"])].get("made_up", "").strip().lower(
 
 metrics = {
     "run": folder.name,
+    "bot_commit": (json.loads((folder / "meta.json").read_text(encoding="utf-8")).get("bot_commit")
+                   if (folder / "meta.json").exists() else None),
     "retrieval (replies with a right page)": len(hit),
     "hit@5": mean(hit),
     "recall@5": mean(recall),

@@ -30,11 +30,28 @@ import importlib.util
 import json
 import pathlib
 import re
+import subprocess
+import sys
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 QUESTIONS = ROOT / "data" / "eval" / "dp_eval_questions.csv"
 RUNS = 1                              # 2 shows replies that change from run to run, but doubles the grading
+
+# The evaluation only reads the bot. Its files must be committed before a run and unchanged after it,
+# so every result belongs to one exact bot version - whatever the metrics turn out to be.
+BOT_FILES = ["spike/08_answer.py", "spike/09_chat.py", "app.py", "data/processed"]
+
+
+def bot_version():
+    """(commit, bot files with uncommitted changes)"""
+    git = lambda *args: subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    return git("rev-parse", "--short", "HEAD"), git("status", "--porcelain", "--", *BOT_FILES)
+
+
+commit, dirty = bot_version()
+if dirty:
+    sys.exit(f"The bot has uncommitted changes. Commit them first, then run the evaluation:\n{dirty}")
 
 # "import 09_chat" is not valid Python (a name cannot start with a digit), so load by path
 _spec = importlib.util.spec_from_file_location("bot", ROOT / "spike" / "09_chat.py")
@@ -67,6 +84,7 @@ out_dir.mkdir(parents=True)
 
 (out_dir / "meta.json").write_text(json.dumps({
     "date": time.strftime("%Y-%m-%d %H:%M"),
+    "bot_commit": commit,
     "questions": len(rows),
     "runs": RUNS,
     "answer_model": bot.rag.ANSWER_MODEL,
@@ -131,6 +149,9 @@ with open(out_dir / "grades.csv", "w", encoding="utf-8-sig", newline="") as f:
     for r in records:
         w.writerow([r["id"], r["run"], r["in_documents"], r["question"], r["expected"],
                     r["reply"], ", ".join(r["pages"]), "", "", ""])
+
+if bot_version() != (commit, ""):
+    print("\nWARNING: the bot changed during this run, so these results do not belong to one version.")
 
 ok = sum((r["in_documents"] == "no") == r["declined"] for r in records)
 lang = sum(r["question_lang"] != r["reply_lang"] for r in records)
