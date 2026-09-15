@@ -15,9 +15,6 @@ SPIKE STEP 9 - The chatbot: a conversation layer on top of the RAG steps in 08.
   3. ANSWER      warm tone, simple words, programme facts only from the documents.
                  If the documents do not cover the question, the model writes
                  NO_ANSWER and the code swaps in a friendly message + the email.
-  4. CHECK       A second call lists the programme facts in the answer that the text
-                 does not support. If there is even one, the friendly message + the email
-                 is sent instead. Eval baseline: 16% of answers had a made-up fact.
 
 THE RULE THAT MUST NOT BREAK: the rewritten question is used for SEARCHING only.
 The answer model reads the user's OWN message plus the conversation. In the first
@@ -49,11 +46,38 @@ _spec.loader.exec_module(rag)
 
 HISTORY_TURNS = 3                     # previous question/answer pairs the bot remembers
 CONTACT = "dp22-28@edu.gov.az"
-CHECK = True                          # check the answer against the text before sending it. False = old behaviour
-CHECK_MODEL = "gpt-4.1-mini"
 READ_BIG = True                       # search small, read big (D-010). False = old behaviour
 PAGE_LIMIT = 4000                     # pages up to this many characters are given whole
 NEIGHBOURS = 1                        # longer pages: the chosen chunk plus this many on each side
+
+# A question with the user's own results ("79 ortalama, IELTS 8.5") needs the selection rules.
+# Search often missed them and the bot said "Bəli" without comparing, so these pages are always given.
+RESULTS = re.compile(r"ortalama|ÜOMG|GPA|\bbal|ielts|toefl|duolingo|DİM|\bdim\b|sertifikat", re.IGNORECASE)
+RULE_PAGES = ["dp-content-65", "dp-content-66"]   # selection criteria: bakalavriat, magistratura
+# A message with these words is about the programme, even when step 1 guesses offtopic.
+PROGRAMME_WORDS = re.compile(r"dövlət proqram|dovlet proqram|\bdp\b|müsahib|musahib|müraciət|muraciet|"
+                             r"təqaüd|teqaud|kvota|kurator|kruator", re.IGNORECASE)
+
+# The model answers around a gap ("... dəqiq demək mümkün deyil, çünki ...") even though the prompt
+# says NO_ANSWER. When an answer admits the asked thing is not in the text, the refusal is sent instead.
+NOT_IN_TEXT = re.compile(r"dəqiq demək mümkün deyil|(dəqiq|konkret)[^.]{0,60}(göstərilməyib|qeyd olunmayıb|yoxdur)",
+                         re.IGNORECASE)
+
+# Added to the answer prompt only when the message holds the user's own results, so other
+# answers do not get a "Nəticə:" line. The verdict comes last, after the comparison.
+ELIGIBILITY_RULES = """
+MÜRACİƏT ŞƏRTLƏRİNİN YOXLANMASI (istifadəçi öz nəticələrini yazıb). ƏVVƏLCƏ müqayisə et, SONRA qərar ver:
+1) Təhsil səviyyəsini müəyyən et: orta məktəbi bitiribsə - bakalavriat, bakalavrı bitiribsə - magistratura.
+2) Hər nəticə üçün ayrıca sətir yaz: nəticə, MƏTN-dəki həmin səviyyənin tələbi, ödənir və ya ödənmir.
+   Məsələn: "- Ortalama: 76, tələb ən azı 81 - ödənmir."
+   Dil balının CEFR səviyyəsi üçün YALNIZ aşağıdakı ÇEVİRMƏ-ni işlət və həmin sətrin sonuna
+   "(ümumi məlumat, rəsmi sənəddən deyil)" yaz. C2 C1-dən yüksəkdir, B2 C1-dən aşağıdır.
+   Tələb MƏTN-də yoxdursa, uydurma: "tələb mətndə tapılmadı" yaz.
+3) Son sətir MÜTLƏQ "Nəticə: Xeyr" və ya "Nəticə: Bəli" ilə başlasın: bir tələb belə ödənmirsə
+   "Nəticə: Xeyr, müraciət edə bilməzsiniz."; hamısı ödənirsə "Nəticə: Bəli, bu tələblər ödənir."
+   Yoxlaya bilmədiyin şərtləri (məsələn, universitetin siyahıda olması) nəticədən sonra bir cümlə ilə qeyd et.
+ÇEVİRMƏ: {conversions}
+"""
 
 WELCOME = (
     "Salam! Mən Xaricdə təhsil üzrə Dövlət Proqramı ilə bağlı suallarınıza cavab "
@@ -78,30 +102,6 @@ NO_ANSWER_REPLY = (
     f"Dövlət Proqramı İdarəetmə Qrupuna yazmağınızı tövsiyə edirəm: {CONTACT}"
 )
 
-CHECK_PROMPT = """Aşağıda istifadəçinin SUALI, çat-botun CAVABI və botun oxuduğu MƏTN var.
-Cavabdakı hər proqram faktını (qayda, tələb, tarix, məbləğ, sənəd, kvota, siyahı, öhdəlik,
-"bəli" və ya "xeyr" hökmü) MƏTN ilə yoxla.
-
-Fakt DƏSTƏKLƏNİR: MƏTN-də yazılıbsa və ya MƏTN-dən birbaşa çıxırsa. Sözlər fərqli ola bilər.
-Fakt DƏSTƏKLƏNMİR:
-- MƏTN-də yoxdursa;
-- MƏTN onu bir qrup üçün deyir, cavab isə başqa qrupa və ya hamıya aid edirsə (məsələn,
-  doktorantura qaydası hamı üçün deyilirsə);
-- cavab "bəli" və ya "xeyr" deyir, amma MƏTN sualın özünə bu cavabı vermirsə.
-Bunları yoxlama: "(ümumi məlumat, rəsmi sənəddən deyil)" ilə işarələnmiş hissə, "Mənbə:" sətri,
-əlaqə e-poçtu, "Bu məlumat ... tarixinə olan vəziyyətdir" cümləsi.
-
-YALNIZ JSON qaytar: {{"unsupported": ["dəstəklənməyən fakt", "..."]}}
-Hər fakt dəstəklənirsə: {{"unsupported": []}}
-
-SUAL: {message}
-
-CAVAB:
-{reply}
-
-MƏTN:
-{context}"""
-
 UNDERSTAND_PROMPT = """Sən Xaricdə təhsil üzrə Dövlət Proqramı haqqında çat-botun ilk addımısan.
 İstifadəçinin SON MESAJINI söhbətin kontekstində başa düş və YALNIZ JSON qaytar.
 
@@ -113,6 +113,10 @@ Mesajın növləri:
   sertifikatlar, universitetlər, siyahılar, elanlar, tarixlər, nəyin dərc olunub-olunmadığı
   və ya bunlarla bağlı anlayışlar haqqında istənilən sual - qısa və ya qeyri-müəyyən olsa
   belə (məsələn, "elan çıxıb?"). Şübhə edirsənsə, "programme" seç.
+  Proqramın mərhələləri (müraciət, müsahibə, seçim, təqaüd, kurator, xərclərin qaytarılması) haqqında sual başqa mövzudan söz
+  işlətsə belə (məsələn, müsahibədə riyaziyyat sualı verilməsi) "programme"dir.
+  Təhsillə bağlı ümumi sual da "programme"dir: beynəlxalq imtahan və sertifikatlar (IELTS,
+  TOEFL, SAT, GRE və s.) nədir, bal şkalası necədir, yaxşı nəticə nə sayılır.
 - "offtopic": yalnız Dövlət Proqramı və xaricdə təhsillə AÇIQ-AYDIN heç bir əlaqəsi olmayan
   mövzu (məsələn, idman, hava, filmlər). Xaricdə yaşayış xərcləri - yemək, kirayə, nəqliyyat,
   ölkələr üzrə məbləğlər - haqqında suallar offtopic DEYİL, proqramın maliyyələşdirməsinə aiddir.
@@ -156,7 +160,8 @@ NECƏ DANIŞMALISAN:
    sənədləri, kvotaları, universitetləri və öhdəlikləri.
    Bunları YALNIZ aşağıdakı MƏTN-dən götür. Mətndə yoxdursa, öz biliyinlə heç vaxt doldurma.
 2) ÜMUMİ MƏLUMAT - beynəlxalq standartların qısa izahı (beynəlxalq imtahanlar,
-   sertifikatlar, dil səviyyələri) və standart beynəlxalq şkalaların çevrilməsi. Bunu öz
+   sertifikatlar, dil səviyyələri, onların bal şkalası və yaxşı nəticə sayılan bal) və
+   standart beynəlxalq şkalaların çevrilməsi. Bunu öz
    biliyinlə 1-2 cümlə ilə verə bilərsən, amma həmin hissənin sonuna mütləq
    "(ümumi məlumat, rəsmi sənəddən deyil)" yaz. Məsləhət vermə.
    Azərbaycana və ya Dövlət Proqramına xas termin və qısaltmaları yalnız MƏTN-dən izah et;
@@ -169,13 +174,14 @@ QAYDALAR:
   Sözlərə yox, MƏNAYA bax.
 - Rəqəmi yalnız sualın soruşduğu tələbə aid olduqda işlət. Başqa təhsil səviyyəsinin və
   ya başqa imtahanın rəqəmini cavab kimi vermə.
-- İstifadəçi öz nəticəsini deyib bəs edib-etmədiyini soruşursa: bəs edirsə "Bəli", bəs
-  etmirsə "Xeyr" ilə başla, sonra tələbi göstər. Şkala çevrilməsi lazımdırsa, ümumi
-  məlumatdan istifadə et və onu işarələ.
 - Sual aydın deyilsə (məsələn, təhsil səviyyəsi deyilməyib) və mətndə bir neçə hal üçün
   cavab varsa, hər hal üçün ayrıca qısa cavab ver.
 - Mətndə sualın mövzusu haqqında heç nə yoxdursa, "bəli" və ya "xeyr" deyərək cavab
   uydurma. Proqram məlumatı mətndə yoxdursa, yalnız NO_ANSWER yaz, başqa heç nə yazma.
+  Sual konkret bir şey soruşursa (məsələn, bir sənədin neçə günə yoxlandığı, konkret bir halın
+  nəticəsi) və MƏTN məhz bunu demirsə, yaxın mövzudakı faktlarla və ya məsləhətlə cavab qurma -
+  yalnız NO_ANSWER yaz. Belə YAZMA: "... dəqiq göstərilməyib, amma ..." və ya "dəqiq demək
+  mümkün deyil, çünki ...". Bu hallarda cavabın hamısı yalnız NO_ANSWER olmalıdır.
   Cavabının bütün mənası "bu barədə məlumat yoxdur" olacaqsa, onu öz sözlərinlə yazma -
   yalnız NO_ANSWER yaz.
 - Siyahının və ya elanın dərc olunub-olunmadığı soruşulursa: mətndəki tədris ilini
@@ -205,8 +211,24 @@ SÖHBƏTİN SONU:
 İSTİFADƏÇİNİN SON MESAJI: {message}
 (Botun anladığı sual, təxmini: {question})
 {offtopic_note}
+{eligibility}
 
 CAVAB:"""
+
+
+def cefr_notes(message):
+    """IELTS and TOEFL scores in the message, converted to CEFR in code.
+    Given the scale in the prompt, the model still wrote "IELTS 6.5 = C1" (it is B2)."""
+    notes = []
+    for m in re.finditer(r"ielts\D{0,12}?(\d(?:[.,]\d)?)", message, re.IGNORECASE):
+        score = float(m.group(1).replace(",", "."))
+        level = "C2" if score >= 8.5 else "C1" if score >= 7 else "B2" if score >= 5.5 else "B1 və ya aşağı"
+        notes.append(f"IELTS {m.group(1)} = {level}")
+    for m in re.finditer(r"toefl\D{0,12}?(\d{2,3})", message, re.IGNORECASE):
+        score = int(m.group(1))
+        level = "C2" if score >= 114 else "C1" if score >= 95 else "B2" if score >= 72 else "B1 və ya aşağı"
+        notes.append(f"TOEFL iBT {score} = {level}")
+    return "; ".join(notes) or "(dil sertifikatı balı yazılmayıb)"
 
 
 def _cost(usage):
@@ -250,24 +272,6 @@ def _says_only_no_info(text):
                         body, re.IGNORECASE)
     partial = re.search(r"\b(amma|lakin|ancaq|bununla belə)\b", body, re.IGNORECASE)
     return bool(no_info) and not partial and len(body.strip()) < 220
-
-
-def check(message, reply, context, usage):
-    """Step 4: which programme facts in the reply does the text NOT support?
-    The answer prompt already says "only from the text", but the model breaks that rule:
-    asked about paying bank debt from the stipend, it invented two different rules in two runs."""
-    r = rag._setup()["llm"].chat.completions.create(
-        model=CHECK_MODEL, temperature=0, response_format={"type": "json_object"},
-        messages=[{"role": "user", "content": CHECK_PROMPT.format(
-            message=message, reply=reply, context=context)}])
-    tokens = usage.setdefault(CHECK_MODEL, [0, 0])
-    tokens[0] += r.usage.prompt_tokens
-    tokens[1] += r.usage.completion_tokens
-    try:
-        found = json.loads(r.choices[0].message.content).get("unsupported", [])
-    except (json.JSONDecodeError, TypeError, AttributeError):
-        found = []                    # a broken check reply: send the answer as before
-    return [str(f).strip() for f in found if str(f).strip()] if isinstance(found, list) else []
 
 
 _corpus = {}
@@ -328,7 +332,8 @@ def chat(message, history=None):
     kind, data = understand(message, history, usage)
     info = {"type": kind}
 
-    if kind == "chat" and str(data.get("reply", "")).strip():
+    # a programme question taken for small talk ("kuratorum cavab vermir ne edim?") still searches
+    if kind == "chat" and str(data.get("reply", "")).strip() and not ("?" in message and PROGRAMME_WORDS.search(message)):
         reply = data["reply"].strip()
     else:
         # "offtopic" is only a suggestion (D-012). Search runs anyway, and the polite off-topic
@@ -347,18 +352,23 @@ def chat(message, history=None):
             pick_question += f"\n(əvvəlki sual: {previous})"
         chosen = rag.pick(pick_question, rag.search(queries), usage)
         blocks = read_big(chosen) if READ_BIG else [(meta["url"], doc) for _, doc, meta in chosen]
+        has_results = bool(re.search(r"\d", message) and RESULTS.search(message))
+        if has_results:
+            pages = _load_corpus()["pages"]
+            known = {url for url, _ in blocks}
+            blocks += [(pages[p]["url"], pages[p]["text"]) for p in RULE_PAGES
+                       if p in pages and pages[p]["url"] not in known]
         context = "\n\n".join(f"[mənbə {n}] {url}\n{body}" for n, (url, body) in enumerate(blocks, 1))
         info["read_chars"] = len(context)
-        info["context"] = context         # saved by the eval, so you can see what the bot read
         text = rag._chat(rag.ANSWER_MODEL, ANSWER_PROMPT.format(
             context=context, history=_format_history(history), message=message, question=question,
             today=time.strftime("%d.%m.%Y"),
-            offtopic_note=OFFTOPIC_NOTE if suggested_offtopic else ""), usage)
-        refused = "NO_ANSWER" in text or _says_only_no_info(text)
-        if CHECK and not refused:
-            info["unsupported"] = check(message, text, context, usage)
-            refused = bool(info["unsupported"])
-        if refused and suggested_offtopic and str(data.get("reply", "")).strip():
+            offtopic_note=OFFTOPIC_NOTE if suggested_offtopic else "",
+            eligibility=ELIGIBILITY_RULES.format(conversions=cefr_notes(message)) if has_results else ""), usage)
+        refused = ("NO_ANSWER" in text or _says_only_no_info(text)
+                   or (not has_results and bool(NOT_IN_TEXT.search(text))))
+        if (refused and suggested_offtopic and not PROGRAMME_WORDS.search(message)
+                and str(data.get("reply", "")).strip()):
             reply, info["type"] = data["reply"].strip(), "offtopic"
         else:
             reply = NO_ANSWER_REPLY if refused else text

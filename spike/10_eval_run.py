@@ -70,7 +70,7 @@ out_dir.mkdir(parents=True)
     "questions": len(rows),
     "runs": RUNS,
     "answer_model": bot.rag.ANSWER_MODEL,
-    "check_model": bot.CHECK_MODEL if bot.CHECK else None,
+    "check_model": bot.CHECK_MODEL if getattr(bot, "CHECK", False) else None,
     "search_model": bot.rag.SEARCH_MODEL,
     "base_url": bot.rag.BASE_URL,
     "read_big": bot.READ_BIG,
