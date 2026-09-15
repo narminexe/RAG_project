@@ -349,7 +349,7 @@ def chat(message, history=None):
         blocks = read_big(chosen) if READ_BIG else [(meta["url"], doc) for _, doc, meta in chosen]
         context = "\n\n".join(f"[mənbə {n}] {url}\n{body}" for n, (url, body) in enumerate(blocks, 1))
         info["read_chars"] = len(context)
-        info["context"] = context         # the eval judge checks the reply against this text
+        info["context"] = context         # saved by the eval, so you can see what the bot read
         text = rag._chat(rag.ANSWER_MODEL, ANSWER_PROMPT.format(
             context=context, history=_format_history(history), message=message, question=question,
             today=time.strftime("%d.%m.%Y"),

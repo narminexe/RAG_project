@@ -1,25 +1,29 @@
 r"""
-EVAL STEP 1 - Ask the bot every test question and save what it did.
+EVAL STEP 1 - Ask the bot every test question and make a grading sheet.
 
-Reads data/eval/dp_eval_questions.csv (question, answer, in_documents) and sends each
-question to chat() in 09_chat.py. That is the same function the Streamlit app calls, so
-this measures the real bot, not a copy of it.
-
-Every question is asked RUNS times, because the same question can get a different answer
-from one run to the next (DECISIONS.md D-010, D-012). One run would hide that.
+Reads data/eval/dp_eval_questions.csv (question, answer, in_documents, source_pages) and
+sends each question to chat() in 09_chat.py. That is the same function the Streamlit app
+calls, so this measures the real bot, not a copy of it.
 
 A question that starts with "bəs " ("and what about...") continues the conversation of
 the question above it, the way a real user would ask it. Asked alone it makes no sense.
 
-Nothing is graded here. Asking the bot costs OpenAI money; grading is done by Gemini in
-11_eval_judge.py. Keeping them apart means a grading problem never makes you pay for the
-answers twice.
+The replies are graded BY HAND. The set is small (up to ~100 questions), and the person who
+knows the programme grades better: an LLM judge tried on 2026-09-15 matched the hand grades
+on only 14 of 20 replies.
 
-Output: results/eval/<date_time>/answers.jsonl   one line per question per run
+Output: results/eval/<date_time>/answers.jsonl   everything the bot did, one line per reply
+        results/eval/<date_time>/grades.csv      the sheet you fill in
         results/eval/<date_time>/meta.json       which models and settings were tested
 
+In grades.csv, fill in for every row:
+  grade     correct, partly or wrong
+  made_up   yes, if the reply states a programme fact that is not on the pages it read
+  reason    optional: why
+Save it in Excel as "CSV UTF-8", then run step 2.
+
 Run:  .venv\Scripts\python.exe spike\10_eval_run.py
-Next: .venv\Scripts\python.exe spike\11_eval_judge.py
+Next: .venv\Scripts\python.exe spike\11_eval_metrics.py
 """
 import csv
 import importlib.util
@@ -30,7 +34,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 QUESTIONS = ROOT / "data" / "eval" / "dp_eval_questions.csv"
-RUNS = 2
+RUNS = 1                              # 2 shows replies that change from run to run, but doubles the grading
 
 # "import 09_chat" is not valid Python (a name cannot start with a digit), so load by path
 _spec = importlib.util.spec_from_file_location("bot", ROOT / "spike" / "09_chat.py")
@@ -72,7 +76,7 @@ out_dir.mkdir(parents=True)
     "read_big": bot.READ_BIG,
 }, indent=2), encoding="utf-8")
 
-print(f"{len(rows)} questions x {RUNS} runs. Loading the bot (~20 s)...")
+print(f"{len(rows)} questions x {RUNS} run(s). Loading the bot (~20 s)...")
 bot.rag._setup()
 
 t0 = time.time()
@@ -120,10 +124,18 @@ with open(out_dir / "answers.jsonl", "w", encoding="utf-8") as out:
             print(f"run {run}  {qid}  {'declined' if record['declined'] else 'answered':<8}  "
                   f"{'ok   ' if as_expected else 'CHECK'}  {question[:55]}")
 
+with open(out_dir / "grades.csv", "w", encoding="utf-8-sig", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["id", "run", "in_documents", "question", "correct_answer", "bot_reply",
+                "pages_read", "grade", "made_up", "reason"])
+    for r in records:
+        w.writerow([r["id"], r["run"], r["in_documents"], r["question"], r["expected"],
+                    r["reply"], ", ".join(r["pages"]), "", "", ""])
+
 ok = sum((r["in_documents"] == "no") == r["declined"] for r in records)
 lang = sum(r["question_lang"] != r["reply_lang"] for r in records)
 print(f"\nanswered or declined as expected: {ok}/{len(records)}")
 print(f"replied in another language:      {lang}")
 print(f"errors:                           {sum(bool(r['error']) for r in records)}")
 print(f"cost ~${sum(r['cost'] for r in records):.3f}, {time.time() - t0:.0f} s")
-print(f"saved to {out_dir.relative_to(ROOT)}")
+print(f"grade the replies in {(out_dir / 'grades.csv').relative_to(ROOT)}")
