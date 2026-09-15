@@ -15,6 +15,9 @@ SPIKE STEP 9 - The chatbot: a conversation layer on top of the RAG steps in 08.
   3. ANSWER      warm tone, simple words, programme facts only from the documents.
                  If the documents do not cover the question, the model writes
                  NO_ANSWER and the code swaps in a friendly message + the email.
+  4. CHECK       A second call lists the programme facts in the answer that the text
+                 does not support. If there is even one, the friendly message + the email
+                 is sent instead. Eval baseline: 16% of answers had a made-up fact.
 
 THE RULE THAT MUST NOT BREAK: the rewritten question is used for SEARCHING only.
 The answer model reads the user's OWN message plus the conversation. In the first
@@ -46,6 +49,8 @@ _spec.loader.exec_module(rag)
 
 HISTORY_TURNS = 3                     # previous question/answer pairs the bot remembers
 CONTACT = "dp22-28@edu.gov.az"
+CHECK = True                          # check the answer against the text before sending it. False = old behaviour
+CHECK_MODEL = "gpt-4.1-mini"
 READ_BIG = True                       # search small, read big (D-010). False = old behaviour
 PAGE_LIMIT = 4000                     # pages up to this many characters are given whole
 NEIGHBOURS = 1                        # longer pages: the chosen chunk plus this many on each side
@@ -72,6 +77,30 @@ NO_ANSWER_REPLY = (
     "Təəssüf ki, bu barədə rəsmi sənədlərdə məlumat tapa bilmədim. Dəqiq cavab üçün "
     f"Dövlət Proqramı İdarəetmə Qrupuna yazmağınızı tövsiyə edirəm: {CONTACT}"
 )
+
+CHECK_PROMPT = """Aşağıda istifadəçinin SUALI, çat-botun CAVABI və botun oxuduğu MƏTN var.
+Cavabdakı hər proqram faktını (qayda, tələb, tarix, məbləğ, sənəd, kvota, siyahı, öhdəlik,
+"bəli" və ya "xeyr" hökmü) MƏTN ilə yoxla.
+
+Fakt DƏSTƏKLƏNİR: MƏTN-də yazılıbsa və ya MƏTN-dən birbaşa çıxırsa. Sözlər fərqli ola bilər.
+Fakt DƏSTƏKLƏNMİR:
+- MƏTN-də yoxdursa;
+- MƏTN onu bir qrup üçün deyir, cavab isə başqa qrupa və ya hamıya aid edirsə (məsələn,
+  doktorantura qaydası hamı üçün deyilirsə);
+- cavab "bəli" və ya "xeyr" deyir, amma MƏTN sualın özünə bu cavabı vermirsə.
+Bunları yoxlama: "(ümumi məlumat, rəsmi sənəddən deyil)" ilə işarələnmiş hissə, "Mənbə:" sətri,
+əlaqə e-poçtu, "Bu məlumat ... tarixinə olan vəziyyətdir" cümləsi.
+
+YALNIZ JSON qaytar: {{"unsupported": ["dəstəklənməyən fakt", "..."]}}
+Hər fakt dəstəklənirsə: {{"unsupported": []}}
+
+SUAL: {message}
+
+CAVAB:
+{reply}
+
+MƏTN:
+{context}"""
 
 UNDERSTAND_PROMPT = """Sən Xaricdə təhsil üzrə Dövlət Proqramı haqqında çat-botun ilk addımısan.
 İstifadəçinin SON MESAJINI söhbətin kontekstində başa düş və YALNIZ JSON qaytar.
@@ -223,6 +252,24 @@ def _says_only_no_info(text):
     return bool(no_info) and not partial and len(body.strip()) < 220
 
 
+def check(message, reply, context, usage):
+    """Step 4: which programme facts in the reply does the text NOT support?
+    The answer prompt already says "only from the text", but the model breaks that rule:
+    asked about paying bank debt from the stipend, it invented two different rules in two runs."""
+    r = rag._setup()["llm"].chat.completions.create(
+        model=CHECK_MODEL, temperature=0, response_format={"type": "json_object"},
+        messages=[{"role": "user", "content": CHECK_PROMPT.format(
+            message=message, reply=reply, context=context)}])
+    tokens = usage.setdefault(CHECK_MODEL, [0, 0])
+    tokens[0] += r.usage.prompt_tokens
+    tokens[1] += r.usage.completion_tokens
+    try:
+        found = json.loads(r.choices[0].message.content).get("unsupported", [])
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        found = []                    # a broken check reply: send the answer as before
+    return [str(f).strip() for f in found if str(f).strip()] if isinstance(found, list) else []
+
+
 _corpus = {}
 
 
@@ -302,11 +349,15 @@ def chat(message, history=None):
         blocks = read_big(chosen) if READ_BIG else [(meta["url"], doc) for _, doc, meta in chosen]
         context = "\n\n".join(f"[mənbə {n}] {url}\n{body}" for n, (url, body) in enumerate(blocks, 1))
         info["read_chars"] = len(context)
+        info["context"] = context         # the eval judge checks the reply against this text
         text = rag._chat(rag.ANSWER_MODEL, ANSWER_PROMPT.format(
             context=context, history=_format_history(history), message=message, question=question,
             today=time.strftime("%d.%m.%Y"),
             offtopic_note=OFFTOPIC_NOTE if suggested_offtopic else ""), usage)
         refused = "NO_ANSWER" in text or _says_only_no_info(text)
+        if CHECK and not refused:
+            info["unsupported"] = check(message, text, context, usage)
+            refused = bool(info["unsupported"])
         if refused and suggested_offtopic and str(data.get("reply", "")).strip():
             reply, info["type"] = data["reply"].strip(), "offtopic"
         else:
