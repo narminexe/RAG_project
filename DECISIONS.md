@@ -498,3 +498,115 @@ period. Are these amounts still current? The bot now states them with confidence
 
 **Cost:** the note gained one ~1,300-character line; an offtopic message that goes through
 search costs about $0.002.
+
+---
+
+## D-015 — Evaluation set and metrics (2026-09-15)
+
+**Decision:** `data/eval/dp_eval_questions.csv` holds 34 questions a real applicant would ask
+(25 Azerbaijani, 4 English, 5 Russian), each with my own correct answer and two labels:
+- `in_documents`: yes if the answer is on the bot's 29 pages, no if it is not. It means the
+  bot's pages, not the website: the 20% doktorantura share of the quota is on dp.edu.az but
+  not in the corpus, so q15 and q32 are no. 19 questions are yes, 15 are no.
+- `source_pages`: the pages that hold the answer, for the 19 yes questions.
+
+A question starting with "bəs" is asked in the same conversation as the one above it.
+
+**Metrics** (`spike/11_eval_metrics.py`):
+- retrieval, on the yes questions, from the pages the answer model read: hit@5, recall@5,
+  precision@5, MRR. No grading needed.
+- generation, from hand grades: answer correctness, faithfulness (no hallucinated programme
+  fact), refusal accuracy (a proper "I don't know" + email on the no questions).
+
+**Labels were wrong at first.** I set `in_documents` by searching for the words of my own
+answers, and missed pages that answer the question in other words. q08, q09 and q12 moved from
+no to yes after reading the page text; q12 also needed dp-content-74 in `source_pages`. The rule
+that caught it: if the bot answers correctly and nothing in the answer is invented, the page must
+hold the answer.
+
+**What it costs:** 34 questions is small. One question flipping moves a score by about 3 points,
+so only large changes mean something. Precision@5 cannot go much above 0.5: most questions have
+one right page and the bot reads two or three.
+
+**What would change my mind:** questions from real applicants' emails, which would replace
+the ones I wrote. The set can grow to about 100 and still be graded by hand.
+
+---
+
+## D-016 — Grading by hand, not by an LLM judge (2026-09-15)
+
+**Decision:** I grade every reply myself. `spike/10_eval_run.py` asks each question once and
+writes `grades.csv` with three columns to fill: `grade` (correct / partly / wrong), `made_up`
+(yes = hallucination: a programme fact that is not on the pages it read) and `reason`.
+
+**Tried first:**
+- Gemini as judge: the free tier allowed about 20 grades a day, 3.8 Flash kept answering
+  "503 high demand", and Pro models are not on the free tier. Dropped.
+- gpt-5.4 as judge, grading each reply against my answer, reasoning first. On 20 replies I
+  graded myself it agreed 13 times, 14 after fixing its instructions (it ignored the
+  `in_documents` label and guessed it from my answers) and my wrong labels. It graded "did the
+  bot follow its rules", I graded "is it true for the student", and the gap never closed. It
+  cost about $0.58 a run and made the project hard to follow.
+- Pairwise comparison (a judge picks the better of two replies) was discussed. It only helps
+  when there are two bot versions to compare, and it hides the case where both are wrong. Not built.
+
+**Why hand grading:** the set is small (34 rows a run), I know the programme, and 14/20
+agreement is not enough to trust small differences.
+
+**What it costs:** my time on every run, and a single grader's judgement. The name `made_up`
+was misread as "the answer is fine" at first; it means hallucination.
+
+**What would change my mind:** many experiments (Phase 4 ablations, Qwen vs gpt-4.1-mini) or
+well over 100 questions. A judge comes back only if it matches my grades on about 18 of 20.
+
+---
+
+## D-017 — Check the answer against the text before sending it (2026-09-15)
+
+**Problem:** the answer prompt says programme facts only from the text, and the model breaks it.
+Asked "Banka borcum var təqaüddən bağlaya bilərəm?", it invented a different rule in each of two
+runs ("təqaüd bank borcuna yönəldilə bilməz", then "bank borcu müraciətə maneə deyil"). Both
+happened to sound right; the pages say nothing about debt. First judge-graded measurement:
+faithfulness 0.84, refusal accuracy 0.37.
+
+**Tried first and undone:** making step 1 (understand) stronger. gpt-4.1-mini plus a rule that any
+short question is a programme question fixed "kesilsek ne olur?" (it had been answered with
+"Salam!"), but more messages reached the answer step: made-up answers went from 16% to 24% and
+unrelated questions started getting "Salam!". Reverted.
+
+**Decision:** step 4 CHECK in `spike/09_chat.py`. After the answer is written, gpt-4.1-mini lists
+the programme facts in it that the text does not support, including a rule applied to the wrong
+group. If there is even one, the friendly refusal with dp22-28@edu.gov.az is sent instead.
+`CHECK = False` switches it off.
+
+**Measured:**
+- offline, on 7 saved replies: both hallucinations caught (bank debt, waitlist), all 4 correct
+  answers kept, one missed (the doktorantura 5-year rule told to everyone).
+- judge-graded, 68 replies, before and after: faithfulness 0.84 -> 0.91, refusal accuracy
+  0.37 -> 0.67, answer correctness 0.53 -> 0.57. Retrieval unchanged (hit@5 0.84 / 0.82).
+- hand-graded, the bot with the check, 34 replies:
+
+| metric | score |
+|---|---|
+| hit@5 | 0.82 |
+| recall@5 | 0.74 |
+| precision@5 | 0.44 |
+| MRR | 0.75 |
+| answer correctness | 0.59 |
+| faithfulness | 0.97 (one hallucination, q26 "bank riskləri") |
+| refusal accuracy | 0.53 |
+
+The judge and hand numbers come from different graders and different run counts, so they are
+not compared with each other.
+
+**What it costs:** one more small call per programme answer: about $0.003 and 4-5 s per message.
+It also blocks some good answers: "Bəli, magistratura ... mümkündür" (q08) and the Queen Mary list
+answer (q20) became refusals.
+
+**Still failing after this:**
+- short questions typed without Azerbaijani letters ("kesilsek ne olur?", "qayitmasaq nolar?")
+  are read as small talk and get "Salam!"
+- search misses the yearly quota page (dp-content-78) and Korea inside the one-chunk list of 33
+  countries
+- English and Russian questions get an Azerbaijani reply (parked)
+- some no questions get "Bağışlayın, yalnız Dövlət Proqramı..." without the email
