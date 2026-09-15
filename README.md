@@ -21,9 +21,9 @@ A message takes about 4-5 seconds and costs about $0.003. Every design choice, w
 
 ## Evaluation
 
-The bot is tested on 34 questions a real applicant would ask (25 in Azerbaijani, 4 in English, 5 in Russian), each with a hand-written correct answer. 19 of them can be answered from the bot's pages. For the other 15, the right behaviour is to say it doesn't know and give the email. Every question is asked twice, so there are 68 answers.
+The bot is tested on 34 questions a real applicant would ask (25 in Azerbaijani, 4 in English, 5 in Russian), each with a hand-written correct answer. 19 of them can be answered from the bot's pages. For the other 15, the right behaviour is to say it doesn't know and give the email.
 
-`gpt-5.4` grades each reply against the correct answer. On 20 replies I also graded by hand, it gave the same grade 14 times, and 16 times when "partly correct" counts as wrong.
+I grade every reply by hand: the set is small, and I know the programme. Retrieval metrics need no grading.
 
 | | Metric | Before the check | Now | What it means |
 |---|---|---|---|---|
@@ -31,29 +31,27 @@ The bot is tested on 34 questions a real applicant would ask (25 in Azerbaijani,
 | | recall@5 | 0.74 | 0.74 | share of all right pages that the bot read |
 | | precision@5 | 0.48 | 0.44 | share of the pages read that were right. Most questions have one right page, so about 0.5 is close to the best possible |
 | | MRR | 0.78 | 0.75 | how high the first right page was ranked (1st = 1, 2nd = 0.5) |
-| Generation | answer correctness | 0.53 | 0.57 | the reply was correct |
-| | faithfulness | 0.84 | 0.91 | the reply had no made-up programme facts |
-| | refusal accuracy | 0.37 | 0.67 | the bot said "I don't know" when its pages didn't have the answer |
+| Generation | answer correctness | not graded yet | not graded yet | the reply was correct |
+| | faithfulness | not graded yet | not graded yet | the reply had no made-up programme facts |
+| | refusal accuracy | not graded yet | not graded yet | the bot said "I don't know" when its pages didn't have the answer |
 
-Retrieval is measured on the 19 answerable questions, generation on all 68 answers.
+Retrieval is measured on the 19 answerable questions, asked twice (38 replies). Generation comes from my hand grades; the current bot's replies are waiting in `results/eval/2026-09-15_145820/grades.csv`.
 
 Weak spots the evaluation found:
 - Search misses a few pages: the yearly quota (dp-content-78), and Korea inside the list of 33 countries.
 - English and Russian questions get their reply in Azerbaijani.
 - The check sometimes turns a correct answer into "I don't know".
 
-To run the evaluation (about $0.20 for the bot's answers and $0.60 for the grading):
+To run the evaluation, first ask the bot every question (about $0.11):
 
 ```bash
 .venv\Scripts\python.exe spike\10_eval_run.py
 ```
 
-```bash
-.venv\Scripts\python.exe spike\11_eval_judge.py
-```
+Then grade the replies in `grades.csv` in the new `results/eval/` folder: `grade` is correct, partly or wrong, and `made_up` is yes if the reply states a programme fact that isn't on the pages it read. Then compute the metrics:
 
 ```bash
-.venv\Scripts\python.exe spike\12_eval_metrics.py
+.venv\Scripts\python.exe spike\11_eval_metrics.py
 ```
 
 ## Setup
@@ -118,9 +116,9 @@ The website changes, for example when a new university list is published. To reb
 | `spike/00`-`06` | Ingestion: download, extract, chunk, index |
 | `spike/08_answer.py` | Search, pick and answer for one question |
 | `spike/09_chat.py` | The chatbot: conversation on top of `08_answer.py` |
-| `spike/10`-`12` | Evaluation: ask the test questions, grade the replies, compute the metrics |
+| `spike/10`-`11` | Evaluation: ask the test questions and make a grading sheet, then compute the metrics |
 | `data/eval/` | The test questions with their correct answers |
-| `results/eval/` | Evaluation runs: replies, grades, metrics |
+| `results/eval/` | Evaluation runs: replies, hand grades, metrics |
 | `scripts/discover_sources.py` | Finds the pages on dp.edu.az and writes `data/sources.csv` |
 | `data/processed/` | Clean text and chunks |
 | `DECISIONS.md` | Every design choice and why |
